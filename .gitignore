@@ -1,10 +1,21 @@
 .env
+.env.*
+!.env.example
+backend/.env*
+!backend/.env.example
+frontend/.env*
+!frontend/.env.example
 backend/db.sqlite3
+backend/db-*.sqlite3
+backend/local_backups/*.sqlite3
+backend/media/
 backend/admin_dashboard_full.txt
 backend/__pycache__/
 backend/*/__pycache__/
 frontend/node_modules/
 frontend/dist/
+backend/static/
+backend/static/frontend/
 frontend/.vite-check/
 venv/
 __pycache__/
@@ -16,3 +27,4 @@ __pycache__/
 frontend/.vite/
 frontend/.vite-check/
 .qodo/
+desktop.ini
