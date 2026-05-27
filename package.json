@@ -4,7 +4,12 @@
   "description": "Unified AFN Service Management Dashboard",
   "scripts": {
     "build": "cd ./frontend && npm install && npm run build && cd .. && mv frontend/dist dist || true",
-    "dev": "cd frontend && npm run dev"
+    "build:pythonanywhere": "cd ./frontend && npm install && npm run build:pythonanywhere",
+    "dev": "cd frontend && npm run dev",
+    "dev:full": "cd frontend && npm run dev:full",
+    "check:backend": "cd backend && ..\\venv\\Scripts\\python.exe manage.py check",
+    "test:backend": "cd backend && ..\\venv\\Scripts\\python.exe manage.py test",
+    "build:frontend": "cd frontend && npm run build"
   },
   "private": true
 }
