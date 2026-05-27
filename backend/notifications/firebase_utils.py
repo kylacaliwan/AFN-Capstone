@@ -14,7 +14,14 @@ except ModuleNotFoundError:
 
 # Initialize Firebase Admin SDK
 try:
-    if firebase_admin and not firebase_admin.apps:
+    firebase_app = None
+    if firebase_admin:
+        try:
+            firebase_app = firebase_admin.get_app()
+        except ValueError:
+            firebase_app = None
+
+    if firebase_admin and firebase_app is None:
         cred = credentials.Certificate({
             'type': 'service_account',
             'project_id': settings.FIREBASE_PROJECT_ID,
@@ -30,6 +37,8 @@ try:
         firebase_admin.initialize_app(cred)
         logger.info("Firebase Admin SDK initialized successfully")
 except Exception as e:
+    if getattr(settings, 'IS_PRODUCTION', False):
+        raise
     logger.warning(f"Firebase initialization failed (development mode): {e}")
 
 
@@ -58,14 +67,14 @@ def create_in_app_notification(*, user, title, body, notification_type='info', t
 def send_push_notification(title, body, fcm_token=None, user_id=None, data=None):
     """
     Send push notification via Firebase Cloud Messaging
-    
+
     Args:
         title: Notification title
         body: Notification body
         fcm_token: Individual FCM token (optional)
         user_id: User ID to get all their tokens (optional)
         data: Additional data payload (optional)
-    
+
     Returns:
         bool: True if sent successfully
     """
@@ -79,7 +88,7 @@ def send_push_notification(title, body, fcm_token=None, user_id=None, data=None)
 
     try:
         tokens = []
-        
+
         if fcm_token:
             tokens = [fcm_token]
         elif user_id:
@@ -243,10 +252,10 @@ def send_low_stock_notification(inventory_item):
     Send push notification for low stock items
     """
     from users.models import User
-    
+
     message = f"Low stock alert for {inventory_item.name}"
     body = f"Current: {inventory_item.available_quantity}, Threshold: {inventory_item.minimum_stock}"
-    
+
     # Send to all admin users
     admin_users = User.objects.filter(role__in=['superadmin', 'admin'], is_active=True)
 

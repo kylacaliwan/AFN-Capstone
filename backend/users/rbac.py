@@ -3,13 +3,12 @@ from collections import OrderedDict
 SUPERADMIN_ROLE = 'superadmin'
 ADMIN_ROLE = 'admin'
 ADMIN_WORKSPACE_ROLES = {SUPERADMIN_ROLE, ADMIN_ROLE}
-ADMIN_SCOPED_ROLES = ADMIN_WORKSPACE_ROLES | {'follow_up'}
+ADMIN_SCOPED_ROLES = set(ADMIN_WORKSPACE_ROLES)
 ADMIN_SCOPE_DEFAULTS = {
     SUPERADMIN_ROLE: 'general',
     ADMIN_ROLE: 'general',
-    'follow_up': 'service_follow_up',
 }
-DELEGATED_AUTHORITY_ROLES = {'technician', 'follow_up'}
+DELEGATED_AUTHORITY_ROLES = {'technician'}
 
 AFTER_SALES_DASHBOARD_VIEW = 'after_sales.dashboard.view'
 AFTER_SALES_CASES_VIEW = 'after_sales.cases.view'
@@ -26,6 +25,7 @@ TECHNICIAN_CHECKLIST_VIEW = 'technician.checklist.view'
 TECHNICIAN_MESSAGES_VIEW = 'technician.messages.view'
 TECHNICIAN_HISTORY_VIEW = 'technician.history.view'
 TECHNICIAN_PROFILE_VIEW = 'technician.profile.view'
+ADMIN_JOB_HISTORY_VIEW = 'admin.job_history.view'
 MANAGE_STAFF_CAPABILITIES = 'users.capabilities.manage_staff'
 USER_DIRECTORY_VIEW = 'users.directory.view'
 
@@ -63,7 +63,7 @@ CAPABILITY_DEFINITIONS = OrderedDict([
         {
             'label': 'Open supervisor dashboard',
             'description': 'View the supervisor dashboard and queue health.',
-            'category': 'Supervisor',
+            'category': 'Operations',
             'assignable': True,
         },
     ),
@@ -72,7 +72,7 @@ CAPABILITY_DEFINITIONS = OrderedDict([
         {
             'label': 'Open supervisor tickets',
             'description': 'Review service tickets inside the supervisor workspace.',
-            'category': 'Supervisor',
+            'category': 'Operations',
             'assignable': True,
         },
     ),
@@ -81,7 +81,7 @@ CAPABILITY_DEFINITIONS = OrderedDict([
         {
             'label': 'Open dispatch board',
             'description': 'Assign technicians and manage dispatch decisions.',
-            'category': 'Supervisor',
+            'category': 'Operations',
             'assignable': True,
         },
     ),
@@ -90,7 +90,7 @@ CAPABILITY_DEFINITIONS = OrderedDict([
         {
             'label': 'Open technician tracking',
             'description': 'Monitor technician locations and live movement.',
-            'category': 'Supervisor',
+            'category': 'Operations',
             'assignable': True,
         },
     ),
@@ -171,7 +171,7 @@ CAPABILITY_DEFINITIONS = OrderedDict([
         {
             'label': 'Manage staff capabilities',
             'description': 'Grant and revoke approved staff capabilities.',
-            'category': 'Supervisor',
+            'category': 'Operations',
             'assignable': True,
         },
     ),
@@ -184,22 +184,19 @@ CAPABILITY_DEFINITIONS = OrderedDict([
             'assignable': True,
         },
     ),
+    (
+        ADMIN_JOB_HISTORY_VIEW,
+        {
+            'label': 'View job history & heatmap',
+            'description': 'Open the completed job history page and service location heatmap.',
+            'category': 'Administration',
+            'assignable': True,
+        },
+    ),
 ])
 
 
 STAFF_ROLE_CAPABILITY_MAP = {
-    'follow_up': {
-        AFTER_SALES_DASHBOARD_VIEW,
-        AFTER_SALES_CASES_VIEW,
-        AFTER_SALES_CASES_MANAGE,
-    },
-    'supervisor': {
-        SUPERVISOR_DASHBOARD_VIEW,
-        SUPERVISOR_TICKETS_VIEW,
-        SUPERVISOR_DISPATCH_VIEW,
-        SUPERVISOR_TRACKING_VIEW,
-        MANAGE_STAFF_CAPABILITIES,
-    },
     'technician': {
         TECHNICIAN_DASHBOARD_VIEW,
         TECHNICIAN_JOBS_VIEW,
@@ -291,15 +288,17 @@ USER_DIRECTORY_VIEW_CAPABILITIES = {
     USER_DIRECTORY_VIEW,
 }
 
+ADMIN_JOB_HISTORY_CAPABILITIES = {
+    ADMIN_JOB_HISTORY_VIEW,
+}
+
 
 ROLE_CAPABILITY_MAP = {
     SUPERADMIN_ROLE: set(CAPABILITY_DEFINITIONS.keys()),
     ADMIN_ROLE: {
         code for code in CAPABILITY_DEFINITIONS.keys()
-        if code not in {MANAGE_STAFF_CAPABILITIES, USER_DIRECTORY_VIEW}
-    },
-    'follow_up': set(STAFF_ROLE_CAPABILITY_MAP['follow_up']),
-    'supervisor': set(STAFF_ROLE_CAPABILITY_MAP['supervisor']),
+        if code not in {MANAGE_STAFF_CAPABILITIES, USER_DIRECTORY_VIEW, ADMIN_JOB_HISTORY_VIEW}
+    } | AFTER_SALES_VIEW_CAPABILITIES | SUPERVISOR_DASHBOARD_CAPABILITIES | SUPERVISOR_TICKET_CAPABILITIES | SUPERVISOR_DISPATCH_CAPABILITIES | SUPERVISOR_TRACKING_CAPABILITIES,
     'technician': set(STAFF_ROLE_CAPABILITY_MAP['technician']),
     'client': set(),
 }
@@ -355,18 +354,15 @@ def get_assignable_capability_codes(actor, target_user=None):
 
     target_role = getattr(target_user, 'role', None)
 
-    if is_superadmin_role(getattr(actor, 'role', None)):
+    actor_role = getattr(actor, 'role', None)
+
+    if is_superadmin_role(actor_role):
         if target_role and is_staff_role(target_role):
             return get_staff_role_capability_codes(target_role)
         return {
             item['code']
             for item in get_capability_catalog(include_non_assignable=False)
         }
-
-    if user_has_capability(actor, MANAGE_STAFF_CAPABILITIES):
-        if target_role and can_receive_delegated_authority(target_role):
-            return get_staff_role_capability_codes(target_role)
-        return set(AFTER_SALES_VIEW_CAPABILITIES)
 
     return set()
 
@@ -438,13 +434,4 @@ def can_manage_user_capabilities(actor, target_user):
             return True
         return target_role in (MANAGEABLE_STAFF_ROLES | {ADMIN_ROLE})
 
-    if not user_has_capability(actor, MANAGE_STAFF_CAPABILITIES):
-        return False
-
-    if not target_user:
-        return True
-
-    if target_user.id == actor.id:
-        return False
-
-    return can_receive_delegated_authority(target_role)
+    return False

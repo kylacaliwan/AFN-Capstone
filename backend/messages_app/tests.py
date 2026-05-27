@@ -1,133 +1,114 @@
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
 from messages_app.models import Message
-from services.models import ServiceLocation, ServiceRequest, ServiceTicket, ServiceType
 from users.models import User
 
 
 class MessageApiTests(APITestCase):
     def setUp(self):
-        self.client_user = User.objects.create_user(
-            username='message-client',
+        self.admin_user = User.objects.create_user(
+            username='message-admin',
             password='Password123!',
-            role='client',
-            phone='+639170000001',
+            role='admin',
+            first_name='Admin',
+            last_name='One',
+        )
+        self.superadmin_user = User.objects.create_user(
+            username='message-superadmin',
+            password='Password123!',
+            role='superadmin',
+            first_name='Super',
+            last_name='Admin',
         )
         self.technician_user = User.objects.create_user(
             username='message-tech',
             password='Password123!',
             role='technician',
-            phone='+639170000002',
+            first_name='Tech',
+            last_name='One',
         )
-        self.supervisor_user = User.objects.create_user(
-            username='message-supervisor',
-            password='Password123!',
-            role='supervisor',
-            phone='+639170000003',
-        )
-        self.outsider_user = User.objects.create_user(
-            username='message-outsider',
+        self.client_user = User.objects.create_user(
+            username='message-client',
             password='Password123!',
             role='client',
-            phone='+639170000004',
         )
-        self.service_type = ServiceType.objects.create(
-            name='Message Test Service',
-            description='Message flow',
-            estimated_duration=60,
-        )
-        self.request_obj = ServiceRequest.objects.create(
-            client=self.client_user,
-            service_type=self.service_type,
-            description='Need help with a service request',
-            priority='Normal',
-            status='Approved',
-        )
-        ServiceLocation.objects.create(
-            request=self.request_obj,
-            address='123 Message Street',
-            city='Pasig',
-            province='Metro Manila',
-            latitude='14.580000',
-            longitude='121.060000',
-        )
-        self.ticket = ServiceTicket.objects.create(
-            request=self.request_obj,
-            technician=self.technician_user,
-            supervisor=self.supervisor_user,
-            scheduled_date=timezone.localdate(),
-            status='Not Started',
-            priority='Normal',
-        )
-        self.token = Token.objects.create(user=self.client_user)
+        self.token = Token.objects.create(user=self.admin_user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
 
-    def test_list_messages_includes_ui_friendly_fields(self):
-        Message.objects.create(
-            ticket=self.ticket,
-            sender=self.technician_user,
-            receiver=self.client_user,
-            message_text='Technician update',
-        )
-
-        response = self.client.get('/api/messages/')
+    def test_participants_are_staff_only(self):
+        response = self.client.get('/api/messages/participants/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        results = response.data.get('results', response.data)
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]['text'], 'Technician update')
-        self.assertEqual(results[0]['sender_name'], 'message-tech')
-        self.assertEqual(results[0]['receiver_name'], 'message-client')
-        self.assertEqual(results[0]['ticket_id'], self.ticket.id)
-        self.assertEqual(results[0]['ticket_address'], '123 Message Street')
+        participant_ids = {item['id'] for item in response.data}
+        self.assertIn(self.superadmin_user.id, participant_ids)
+        self.assertIn(self.technician_user.id, participant_ids)
+        self.assertNotIn(self.client_user.id, participant_ids)
+        self.assertNotIn(self.admin_user.id, participant_ids)
 
-    def test_create_message_accepts_frontend_text_payload(self):
+    def test_create_direct_message_between_admin_and_technician(self):
         response = self.client.post(
             '/api/messages/',
             {
-                'ticket': self.ticket.id,
+                'room_type': 'direct',
                 'receiver': self.technician_user.id,
-                'text': 'Client reply message',
+                'text': 'Please update your current job status.',
             },
             format='json',
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         message = Message.objects.get(id=response.data['id'])
-        self.assertEqual(message.sender, self.client_user)
+        self.assertEqual(message.sender, self.admin_user)
         self.assertEqual(message.receiver, self.technician_user)
-        self.assertEqual(message.message_text, 'Client reply message')
+        self.assertEqual(message.room_type, 'direct')
+        self.assertEqual(message.message_text, 'Please update your current job status.')
 
-    def test_create_message_rejects_receiver_outside_ticket_thread(self):
+    def test_create_group_message_for_staff_room(self):
         response = self.client.post(
             '/api/messages/',
             {
-                'ticket': self.ticket.id,
-                'receiver': self.outsider_user.id,
-                'text': 'This should not be allowed',
+                'room_type': 'group',
+                'group_key': 'staff',
+                'text': 'Team reminder for today.',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        message = Message.objects.get(id=response.data['id'])
+        self.assertEqual(message.room_type, 'group')
+        self.assertEqual(message.group_key, 'staff')
+        self.assertIsNone(message.receiver)
+        self.assertIn('staff', str(message))
+
+    def test_client_cannot_use_staff_messages(self):
+        client_token = Token.objects.create(user=self.client_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {client_token.key}')
+
+        response = self.client.post(
+            '/api/messages/',
+            {
+                'room_type': 'group',
+                'group_key': 'staff',
+                'text': 'Client should not send this.',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_direct_message_rejects_client_receiver(self):
+        response = self.client.post(
+            '/api/messages/',
+            {
+                'room_type': 'direct',
+                'receiver': self.client_user.id,
+                'text': 'This should not be allowed.',
             },
             format='json',
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('receiver', response.data)
-
-    def test_create_message_rejects_sender_outside_ticket_thread(self):
-        outsider_token = Token.objects.create(user=self.outsider_user)
-        self.client.credentials(HTTP_AUTHORIZATION=f'Token {outsider_token.key}')
-
-        response = self.client.post(
-            '/api/messages/',
-            {
-                'ticket': self.ticket.id,
-                'receiver': self.client_user.id,
-                'text': 'This should not be allowed either',
-            },
-            format='json',
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('non_field_errors', response.data)

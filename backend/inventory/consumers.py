@@ -2,24 +2,33 @@ import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.core.serializers.json import DjangoJSONEncoder
-from django.db import models
+from users.rbac import is_admin_workspace_role
 from .models import InventoryItem
 from .serializers import InventoryItemSerializer
 
 
 class InventoryConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        user = self.scope.get('user')
+        self.joined_inventory_group = False
+
+        if not user or not user.is_authenticated or not is_admin_workspace_role(user.role):
+            await self.close()
+            return
+
         await self.channel_layer.group_add(
             "inventory_updates",
             self.channel_name
         )
+        self.joined_inventory_group = True
         await self.accept()
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(
-            "inventory_updates",
-            self.channel_name
-        )
+        if self.joined_inventory_group:
+            await self.channel_layer.group_discard(
+                "inventory_updates",
+                self.channel_name
+            )
 
     async def receive(self, text_data):
         data = json.loads(text_data)
@@ -56,9 +65,7 @@ class InventoryConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def get_low_stock_data(self):
         """Get items that are currently low on stock"""
-        low_stock_items = InventoryItem.objects.filter(
-            models.Q(available_quantity__lte=models.F('minimum_stock') * 0.4)
-        )
+        low_stock_items = [item for item in InventoryItem.objects.all() if item.is_low_stock]
         serializer = InventoryItemSerializer(low_stock_items, many=True)
         return serializer.data
 

@@ -19,7 +19,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     available_quantity = serializers.ReadOnlyField()
     is_low_stock = serializers.ReadOnlyField()
-    
+
     class Meta:
         model = InventoryItem
         fields = '__all__'
@@ -29,7 +29,25 @@ class InventoryTransactionSerializer(serializers.ModelSerializer):
     item_name = serializers.CharField(source='item.name', read_only=True)
     technician_name = serializers.CharField(source='technician.username', read_only=True)
     performed_by_name = serializers.CharField(source='performed_by.username', read_only=True)
-    
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if not self.instance:
+            return attrs
+
+        immutable_fields = ['item', 'transaction_type', 'quantity']
+        changed_fields = [
+            field
+            for field in immutable_fields
+            if field in attrs and attrs[field] != getattr(self.instance, field)
+        ]
+        if changed_fields:
+            raise serializers.ValidationError({
+                field: 'This field cannot be changed after the transaction is created.'
+                for field in changed_fields
+            })
+        return attrs
+
     class Meta:
         model = InventoryTransaction
         fields = '__all__'
@@ -55,7 +73,7 @@ class InventoryReservationSerializer(serializers.ModelSerializer):
                 })
 
         return attrs
-    
+
     class Meta:
         model = InventoryReservation
         fields = '__all__'
@@ -75,4 +93,3 @@ class ServiceTypeInventoryRequirementSerializer(serializers.ModelSerializer):
     class Meta:
         model = ServiceTypeInventoryRequirement
         fields = '__all__'
-

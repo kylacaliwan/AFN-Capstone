@@ -38,9 +38,9 @@ class Command(BaseCommand):
             "address": "AFN Operations Hub, Ortigas Center, Pasig City",
         },
         {
-            "username": "supervisor1",
-            "email": "supervisor@afn.com",
-            "role": "supervisor",
+            "username": "operations_admin1",
+            "email": "operations-admin@afn.com",
+            "role": "admin",
             "first_name": "Carlos",
             "last_name": "Mendoza",
             "phone": "+63 917 555 0101",
@@ -356,7 +356,7 @@ class Command(BaseCommand):
             )
 
     def _seed_requests_and_tickets(self, users, service_types, today):
-        supervisor = users["supervisor1"]
+        supervisor = users["operations_admin1"]
         tech1 = users["tech1"]
         tech2 = users["tech2"]
         client1 = users["client1"]

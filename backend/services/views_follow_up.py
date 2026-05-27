@@ -42,15 +42,30 @@ class FollowUpCaseViewSet(viewsets.ModelViewSet):
         )
 
         status_filter = self.request.query_params.get('status')
-        if status_filter:
+        if status_filter == 'open_work':
+            queryset = queryset.filter(status__in=['open', 'in_progress'])
+        elif status_filter == 'overdue':
+            queryset = queryset.filter(
+                status__in=['open', 'in_progress'],
+                due_date__lt=timezone.localdate(),
+            )
+        elif status_filter:
             queryset = queryset.filter(status=status_filter)
 
         case_type = self.request.query_params.get('case_type')
         if case_type:
             queryset = queryset.filter(case_type=case_type)
 
+        priority = self.request.query_params.get('priority')
+        if priority:
+            queryset = queryset.filter(priority=priority)
+
+        creation_source = self.request.query_params.get('creation_source')
+        if creation_source:
+            queryset = queryset.filter(creation_source=creation_source)
+
         assigned_only = self.request.query_params.get('assigned_only')
-        if assigned_only == 'true' and self.request.user.role == 'follow_up':
+        if assigned_only == 'true':
             queryset = queryset.filter(assigned_to=self.request.user)
 
         return queryset
@@ -69,14 +84,11 @@ class FollowUpCaseViewSet(viewsets.ModelViewSet):
                     'service_ticket': 'Warranty cases can only be opened while the ticket warranty is active.',
                 })
 
-        if self.request.user.role == 'follow_up' and assigned_to and assigned_to != self.request.user:
-            assigned_to = self.request.user
-
         serializer.save(
             client=service_ticket.request.client,
             created_by=self.request.user,
             creation_source='manual',
-            assigned_to=assigned_to or (self.request.user if self.request.user.role == 'follow_up' else assigned_to),
+            assigned_to=assigned_to,
             due_date=serializer.validated_data.get('due_date') or (
                 service_ticket.warranty_end_date if case_type == 'warranty' else serializer.validated_data.get('due_date')
             ),

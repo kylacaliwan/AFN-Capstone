@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework import routers
 from .views import (
-    ServiceTypeViewSet, ServiceRequestViewSet, ServiceLocationViewSet,
+    ServiceTypeViewSet, SLARuleViewSet, ServiceRequestViewSet, ServiceLocationViewSet,
     ServiceTicketViewSet, TechnicianSkillViewSet, ServiceStatusHistoryViewSet,
     InspectionChecklistViewSet, TechnicianLocationHistoryViewSet, GISDashboardView,
     ServiceAnalyticsViewSet, TechnicianPerformanceViewSet, DemandForecastViewSet, ServiceTrendViewSet,
@@ -13,6 +13,7 @@ from .views_dashboard import DashboardView
 
 router = routers.DefaultRouter()
 router.register(r'service-types', ServiceTypeViewSet)
+router.register(r'sla-rules', SLARuleViewSet)
 router.register(r'service-requests', ServiceRequestViewSet)
 router.register(r'service-locations', ServiceLocationViewSet)
 router.register(r'service-tickets', ServiceTicketViewSet)

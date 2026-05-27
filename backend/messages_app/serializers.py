@@ -2,7 +2,20 @@ from rest_framework import serializers
 from .models import Message
 
 
+STAFF_MESSAGE_ROLES = {'superadmin', 'admin', 'technician'}
+
+
 class MessageSerializer(serializers.ModelSerializer):
+    ticket = serializers.PrimaryKeyRelatedField(
+        queryset=Message._meta.get_field('ticket').remote_field.model.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    receiver = serializers.PrimaryKeyRelatedField(
+        queryset=Message._meta.get_field('receiver').remote_field.model.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     text = serializers.CharField(source='message_text')
     timestamp = serializers.DateTimeField(source='created_at', read_only=True)
     ticket_id = serializers.IntegerField(source='ticket.id', read_only=True)
@@ -51,29 +64,27 @@ class MessageSerializer(serializers.ModelSerializer):
 
         request = self.context.get('request')
         sender = getattr(request, 'user', None)
-        ticket = attrs.get('ticket') or getattr(self.instance, 'ticket', None)
+        room_type = attrs.get('room_type') or getattr(self.instance, 'room_type', 'direct') or 'direct'
         receiver = attrs.get('receiver') or getattr(self.instance, 'receiver', None)
 
-        if ticket is None:
-            raise serializers.ValidationError({'ticket': 'A related ticket is required.'})
-        if receiver is None:
-            raise serializers.ValidationError({'receiver': 'A message receiver is required.'})
+        if room_type not in {'direct', 'group'}:
+            raise serializers.ValidationError({'room_type': 'Unsupported message room type.'})
         if not sender or not sender.is_authenticated:
             raise serializers.ValidationError('Authentication is required to send a message.')
+        if sender.role not in STAFF_MESSAGE_ROLES:
+            raise serializers.ValidationError('Only admins, superadmins, and technicians can use staff messages.')
 
-        participant_ids = {
-            ticket.request.client_id,
-            ticket.technician_id,
-            ticket.supervisor_id,
-        }
-        participant_ids.discard(None)
-
-        if sender.id not in participant_ids:
-            raise serializers.ValidationError('You can only send messages for tickets you are part of.')
-        if receiver.id not in participant_ids:
-            raise serializers.ValidationError({'receiver': 'Receiver must belong to the same ticket thread.'})
-        if receiver.id == sender.id:
+        if room_type == 'direct' and receiver is None:
+            raise serializers.ValidationError({'receiver': 'A message receiver is required.'})
+        if room_type == 'direct' and receiver.role not in STAFF_MESSAGE_ROLES:
+            raise serializers.ValidationError({'receiver': 'Choose an admin, superadmin, or technician.'})
+        if room_type == 'direct' and receiver.id == sender.id:
             raise serializers.ValidationError({'receiver': 'Choose another participant for this message.'})
+        if room_type == 'group':
+            attrs['receiver'] = None
+            attrs['group_key'] = attrs.get('group_key') or 'staff'
+        else:
+            attrs['group_key'] = None
 
         return attrs
 
@@ -86,6 +97,8 @@ class MessageSerializer(serializers.ModelSerializer):
             'ticket_address',
             'ticket_latitude',
             'ticket_longitude',
+            'room_type',
+            'group_key',
             'sender',
             'sender_name',
             'sender_phone',

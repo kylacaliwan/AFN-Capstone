@@ -1,6 +1,8 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
+from django.conf import settings
 from django.utils import timezone
 
 from notifications.models import Notification
@@ -164,7 +166,13 @@ def sync_ticket_warranty(ticket, reference_date=None):
         'warranty_notes': None,
     }
 
-    if inspection and inspection.warranty_provided and inspection.warranty_period_days:
+    warranty_was_created = False
+    if (
+        ticket.status == 'Completed' and
+        inspection and
+        inspection.warranty_provided and
+        inspection.warranty_period_days
+    ):
         start_date = (ticket.completed_date or ticket.end_time or timezone.now()).date()
         period_days = int(inspection.warranty_period_days)
         end_date = start_date + timedelta(days=period_days)
@@ -175,6 +183,7 @@ def sync_ticket_warranty(ticket, reference_date=None):
             'warranty_notes': inspection.warranty_notes or inspection.additional_notes,
             'warranty_status': 'active' if reference_date <= end_date else 'expired',
         })
+        warranty_was_created = ticket.warranty_status == 'not_applicable'  # Was not set before
 
     update_fields = []
     for field_name, value in desired_values.items():
@@ -186,7 +195,72 @@ def sync_ticket_warranty(ticket, reference_date=None):
         update_fields.append('updated_at')
         ticket.save(update_fields=update_fields)
 
+    # Notify client about warranty
+    if warranty_was_created and ticket.warranty_status == 'active':
+        client = ticket.request.client
+        warranty_message = f"Warranty activated for ticket #{ticket.id}: Valid until {ticket.warranty_end_date}"
+        Notification.objects.create(
+            user=client,
+            ticket=ticket,
+            request=ticket.request,
+            title='Warranty Activated',
+            message=warranty_message,
+            type='info',
+        )
+
     return ticket
+
+
+def sync_completion_warranty_case(ticket, reference_date=None):
+    if ticket.status != 'Completed' or ticket.warranty_status != 'active':
+        return None
+
+    try:
+        inspection = ticket.inspection
+    except InspectionChecklist.DoesNotExist:
+        return None
+
+    if not inspection.warranty_provided:
+        return None
+
+    reference_date = reference_date or timezone.localdate()
+    due_date = ticket.warranty_end_date or reference_date + timedelta(days=COMPLETION_FOLLOW_UP_DEFAULT_OFFSETS['warranty'])
+    summary = inspection.follow_up_summary or _build_completion_follow_up_summary(ticket, 'warranty')
+    details = _build_completion_follow_up_details(ticket, inspection, 'warranty')
+
+    defaults = {
+        'client': ticket.request.client,
+        'created_by': ticket.technician,
+        'priority': 'high',
+        'summary': summary,
+        'details': details,
+        'due_date': due_date,
+        'requires_revisit': False,
+        'creation_source': 'completion_flow',
+    }
+
+    existing_case = FollowUpCase.objects.filter(
+        service_ticket=ticket,
+        case_type='warranty',
+        creation_source='completion_flow',
+    ).exclude(status__in=['resolved', 'closed']).first()
+
+    if existing_case:
+        for field, value in defaults.items():
+            setattr(existing_case, field, value)
+        existing_case.save(update_fields=[*defaults.keys(), 'updated_at'])
+        _notify_completion_follow_up_case(existing_case, created=False)
+        return existing_case
+
+    case = FollowUpCase.objects.create(
+        service_ticket=ticket,
+        case_type='warranty',
+        status='open',
+        assigned_to=None,
+        **defaults,
+    )
+    _notify_completion_follow_up_case(case, created=True)
+    return case
 
 
 def sync_maintenance_schedule(ticket, reference_date=None):
@@ -213,7 +287,7 @@ def sync_maintenance_schedule(ticket, reference_date=None):
         reference_date=reference_date,
     )
 
-    schedule, _ = MaintenanceSchedule.objects.update_or_create(
+    schedule, created = MaintenanceSchedule.objects.update_or_create(
         service_ticket=ticket,
         defaults={
             'client': ticket.request.client,
@@ -233,6 +307,21 @@ def sync_maintenance_schedule(ticket, reference_date=None):
 
     schedule.status = evaluate_schedule_status(schedule, reference_date=reference_date)
     schedule.save(update_fields=['status', 'updated_at'])
+
+    # Notify client about maintenance schedule (only when first created)
+    if created:
+        client = ticket.request.client
+        profile_label = schedule.get_maintenance_profile_display()
+        maint_message = f"Maintenance scheduled for ticket #{ticket.id}: Next service due on {next_due_date} ({interval_days}-day interval)"
+        Notification.objects.create(
+            user=client,
+            ticket=ticket,
+            request=ticket.request,
+            title='Maintenance Scheduled',
+            message=maint_message,
+            type='info',
+        )
+
     return schedule
 
 
@@ -273,10 +362,11 @@ def _default_completion_follow_up_due_date(ticket, case_type, reference_date):
 
 def _notify_completion_follow_up_case(case, *, created):
     User = get_user_model()
-    recipients = User.objects.filter(role='follow_up', status='active').order_by('id')
+    recipients = User.objects.filter(role__in=['superadmin', 'admin'], status='active').order_by('id')
     action = 'New' if created else 'Updated'
     message = f"{action} after-sales handoff for ticket #{case.service_ticket_id}: {case.summary}"
 
+    # Notify admin workspace users who handle after-sales work
     for recipient in recipients:
         Notification.objects.create(
             user=recipient,
@@ -285,6 +375,25 @@ def _notify_completion_follow_up_case(case, *, created):
             message=message,
             type='info',
         )
+
+    # Notify CLIENT about their case
+    client_message = f"{action} after-sales case: {case.summary}"
+    client_type_map = {
+        'warranty': 'warning',
+        'complaint': 'urgent',
+        'revisit': 'urgent',
+        'feedback': 'info',
+        'follow_up': 'info',
+    }
+    notification_type = client_type_map.get(case.case_type, 'info')
+
+    Notification.objects.create(
+        user=case.client,
+        ticket=case.service_ticket,
+        request=case.service_ticket.request,
+        message=client_message,
+        type=notification_type,
+    )
 
 
 def sync_completion_follow_up_case(ticket, reference_date=None):
@@ -304,8 +413,8 @@ def sync_completion_follow_up_case(ticket, reference_date=None):
     if case_type == 'maintenance':
         return None
 
-    if case_type == 'warranty' and ticket.warranty_status != 'active':
-        case_type = 'follow_up'
+    if case_type == 'warranty':
+        return sync_completion_warranty_case(ticket, reference_date=reference_date)
 
     due_date = inspection.follow_up_due_date or _default_completion_follow_up_due_date(
         ticket,
@@ -358,7 +467,8 @@ def ensure_maintenance_follow_up_case(schedule):
     ).first()
 
     rule = get_maintenance_rule(schedule.maintenance_profile)
-    summary = f"Scheduled maintenance is approaching for {schedule.client.username}"
+    service_name = schedule.service_type.name if schedule.service_type else 'Service'
+    summary = f"{service_name} maintenance due"
     details = (
         f"{rule['label']} maintenance plan. "
         f"Last service date: {schedule.last_service_date}. "
@@ -392,7 +502,7 @@ def ensure_maintenance_follow_up_case(schedule):
 
 def _notify_recipients(schedule, stage):
     User = get_user_model()
-    recipients = User.objects.filter(role__in=['superadmin', 'admin', 'follow_up']).distinct()
+    recipients = User.objects.filter(role__in=['superadmin', 'admin']).distinct()
     stage_label = 'due now' if stage == 'due' else 'coming due'
     title = 'Maintenance alert'
     message = (
@@ -411,10 +521,75 @@ def _notify_recipients(schedule, stage):
         )
 
 
+def _send_client_maintenance_email(schedule):
+    """Send email to client 7 days (1 week) before maintenance is due"""
+    try:
+        client = schedule.client
+        if not client.email:
+            return False
+
+        rule = schedule.get_maintenance_profile_display()
+        service_name = schedule.service_type.name if schedule.service_type else 'service'
+        days_until_due = (schedule.next_due_date - timezone.localdate()).days
+
+        subject = f"Maintenance Reminder - {service_name} Due Soon"
+
+        message_body = f"""
+Hello {client.first_name or client.username},
+
+This is a friendly reminder that your scheduled maintenance for {service_name} is coming up!
+
+Maintenance Details:
+- Service Type: {service_name}
+- Maintenance Profile: {rule}
+- Due Date: {schedule.next_due_date}
+- Days Until Due: {days_until_due} day(s)
+- Last Service Date: {schedule.last_service_date}
+- Interval: {schedule.interval_days} days
+
+Risk Assessment: {schedule.get_risk_level_display().title()} (Score: {schedule.risk_score}/100)
+
+Please schedule your maintenance appointment at your earliest convenience to ensure your equipment continues to operate optimally. Our team is ready to assist you!
+
+{schedule.maintenance_notes and f"Additional Notes from Technician: {schedule.maintenance_notes}" or ""}
+
+If you have any questions or need to reschedule, please contact our support team.
+
+Best regards,
+AFN Service Management
+"""
+
+        send_mail(
+            subject,
+            message_body,
+            settings.DEFAULT_FROM_EMAIL,
+            [client.email],
+            fail_silently=False,
+        )
+
+        # Also create in-app notification for client
+        in_app_message = f"Maintenance reminder: {service_name} is due on {schedule.next_due_date} ({days_until_due} days away)"
+        Notification.objects.create(
+            user=client,
+            ticket=schedule.service_ticket,
+            request=schedule.service_ticket.request,
+            title='Maintenance Reminder',
+            message=in_app_message,
+            type='reminder',
+        )
+
+        return True
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to send maintenance email to client {schedule.client.id}: {e}")
+        return False
+
+
 def process_maintenance_alerts(reference_date=None):
     reference_date = reference_date or timezone.localdate()
     now = timezone.now()
-    summary = {'due_soon': 0, 'due': 0}
+    summary = {'due_soon': 0, 'due': 0, 'client_notified': 0}
 
     schedules = MaintenanceSchedule.objects.select_related(
         'service_ticket__request',
@@ -432,6 +607,13 @@ def process_maintenance_alerts(reference_date=None):
         elif schedule.status == 'due_soon' and schedule.due_soon_notified_at is None:
             stage = 'due_soon'
             schedule.due_soon_notified_at = now
+
+        # Check if we should notify client (1 week/7 days before due)
+        days_until_due = (schedule.next_due_date - reference_date).days
+        if days_until_due == 7 and schedule.client_notified_at is None:
+            if _send_client_maintenance_email(schedule):
+                schedule.client_notified_at = now
+                summary['client_notified'] += 1
 
         schedule.save()
 

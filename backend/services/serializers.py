@@ -3,27 +3,88 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from django.utils import timezone
 from rest_framework import serializers
 from .models import (
-    ServiceType, ServiceRequest, ServiceLocation, ServiceTicket,
+    ServiceType, SLARule, ServiceRequest, ServiceRequestService, ServiceLocation, ServiceTicket,
     AfterSalesCase as FollowUpCase,
-    TechnicianSkill, ServiceStatusHistory, InspectionChecklist, 
+    TechnicianSkill, ServiceStatusHistory, InspectionChecklist,
     TechnicianLocationHistory, ServiceAnalytics, TechnicianPerformance,
-    DemandForecast, ServiceTrend
+    DemandForecast, ServiceTrend, MaintenanceSchedule
 )
 from .sla import (
     evaluate_service_request_sla,
     evaluate_service_ticket_sla,
+    get_ticket_dispatch_state,
     serialize_sla_evaluation,
 )
+from .user_display import client_technician_label
 
 class ServiceTypeSerializer(serializers.ModelSerializer):
     inventory_requirements_count = serializers.SerializerMethodField()
+    inventory_requirements = serializers.SerializerMethodField()
 
     def get_inventory_requirements_count(self, obj):
         return obj.inventory_requirements.count()
 
+    def get_inventory_requirements(self, obj):
+        return [
+            {
+                'id': requirement.id,
+                'item_id': requirement.item_id,
+                'item_name': requirement.item.name,
+                'item_sku': requirement.item.sku,
+                'quantity': requirement.quantity,
+                'available_quantity': requirement.item.available_quantity,
+                'auto_reserve': requirement.auto_reserve,
+            }
+            for requirement in obj.inventory_requirements.select_related('item').order_by('item__name', 'id')
+        ]
+
+    def validate_name(self, value):
+        name = str(value or '').strip()
+        if not name:
+            raise serializers.ValidationError('Service name is required.')
+
+        existing = ServiceType.objects.filter(name__iexact=name)
+        if self.instance:
+            existing = existing.exclude(pk=self.instance.pk)
+        if existing.exists():
+            raise serializers.ValidationError('A service with this name already exists.')
+
+        return name
+
+    def validate_estimated_duration(self, value):
+        if int(value or 0) <= 0:
+            raise serializers.ValidationError('Duration must be greater than zero minutes.')
+        return value
+
+    def validate_estimated_cost(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Estimated cost cannot be negative.')
+        return value
+
+    def validate_max_daily_assignments(self, value):
+        if int(value or 0) <= 0:
+            raise serializers.ValidationError('Max daily assignments must be at least 1.')
+        return value
+
+    def validate_procedures(self, value):
+        if value in (None, ''):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Procedures must be a list of steps.')
+        return value
+
+    def validate_required_equipment(self, value):
+        if value in (None, ''):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Required equipment must be a list.')
+        return value
+
     class Meta:
         model = ServiceType
-        fields = ['id', 'name', 'description', 'estimated_duration', 'inventory_requirements_count']
+        fields = ['id', 'name', 'description', 'estimated_duration', 'estimated_cost',
+                  'max_daily_assignments', 'procedures', 'required_equipment',
+                  'inventory_requirements_count', 'inventory_requirements']
 
 
 class ServiceLocationSerializer(serializers.ModelSerializer):
@@ -32,12 +93,47 @@ class ServiceLocationSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class SLARuleSerializer(serializers.ModelSerializer):
+    label = serializers.CharField(source='get_key_display', read_only=True)
+
+    def validate(self, attrs):
+        warning_minutes = attrs.get('warning_minutes', getattr(self.instance, 'warning_minutes', None))
+        overdue_minutes = attrs.get('overdue_minutes', getattr(self.instance, 'overdue_minutes', None))
+        if warning_minutes is not None and overdue_minutes is not None and warning_minutes >= overdue_minutes:
+            raise serializers.ValidationError('Warning minutes must be less than overdue minutes.')
+        return attrs
+
+    class Meta:
+        model = SLARule
+        fields = ['id', 'key', 'label', 'warning_minutes', 'overdue_minutes', 'is_active', 'notes', 'updated_at']
+        read_only_fields = ['key', 'updated_at']
+
+
+class ServiceRequestServiceSerializer(serializers.ModelSerializer):
+    service_type_name = serializers.CharField(source='service_type.name', read_only=True)
+
+    class Meta:
+        model = ServiceRequestService
+        fields = ['id', 'service_type', 'service_type_name', 'notes', 'status', 'sort_order']
+
+
 class ServiceRequestSerializer(serializers.ModelSerializer):
     COORDINATE_QUANTIZER = Decimal('0.000001')
 
     location = ServiceLocationSerializer(read_only=True)
     client_name = serializers.CharField(source='client.username', read_only=True)
+    client_fullname = serializers.SerializerMethodField()
     service_type_name = serializers.CharField(source='service_type.name', read_only=True)
+    service_summary = serializers.SerializerMethodField()
+    request_source_label = serializers.CharField(source='get_request_source_display', read_only=True)
+    service_items = serializers.SerializerMethodField()
+    service_type = serializers.PrimaryKeyRelatedField(queryset=ServiceType.objects.all(), required=False)
+    service_types = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=False,
+    )
     sla = serializers.SerializerMethodField()
     service = serializers.CharField(write_only=True, required=False, allow_blank=True)
     notes = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -87,6 +183,26 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
 
         raise serializers.ValidationError({'service_type': 'Selected service type does not exist.'})
 
+    def _resolve_service_types(self, service_type_ids):
+        if service_type_ids in (None, ''):
+            return []
+
+        normalized_ids = []
+        for service_type_id in service_type_ids:
+            try:
+                normalized_id = int(service_type_id)
+            except (TypeError, ValueError) as exc:
+                raise serializers.ValidationError({'service_types': 'Choose valid services.'}) from exc
+            if normalized_id not in normalized_ids:
+                normalized_ids.append(normalized_id)
+
+        service_types = list(ServiceType.objects.filter(id__in=normalized_ids))
+        service_type_map = {service_type.id: service_type for service_type in service_types}
+        missing_ids = [service_type_id for service_type_id in normalized_ids if service_type_id not in service_type_map]
+        if missing_ids:
+            raise serializers.ValidationError({'service_types': 'One or more selected services do not exist.'})
+        return [service_type_map[service_type_id] for service_type_id in normalized_ids]
+
     def validate(self, attrs):
         request = self.context.get('request')
         user = getattr(request, 'user', None)
@@ -94,16 +210,34 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
 
         if user and user.is_authenticated and user.role == 'client':
             attrs['client'] = user
+            if creating:
+                attrs['request_source'] = 'client_portal'
         elif creating and not attrs.get('client'):
             raise serializers.ValidationError({'client': 'A client is required.'})
+        elif creating and not attrs.get('request_source'):
+            attrs['request_source'] = 'admin_created'
 
-        if not attrs.get('service_type'):
-            attrs['service_type'] = self._resolve_service_type(attrs.pop('service', None))
-        else:
-            attrs.pop('service', None)
+        legacy_service = attrs.pop('service', None)
+        if legacy_service:
+            raise serializers.ValidationError({
+                'service_type': 'Choose a service from the fixed service list instead of typing a custom service.'
+            })
+
+        requested_service_types = self._resolve_service_types(attrs.pop('service_types', None))
+        if creating and requested_service_types and not attrs.get('service_type'):
+            attrs['service_type'] = requested_service_types[0]
 
         if creating and not attrs.get('service_type'):
             raise serializers.ValidationError({'service_type': 'A service type is required.'})
+        if attrs.get('service_type'):
+            service_items = []
+            seen_ids = set()
+            for service_type in [attrs['service_type'], *requested_service_types]:
+                if service_type.id in seen_ids:
+                    continue
+                seen_ids.add(service_type.id)
+                service_items.append(service_type)
+            attrs['service_items_payload'] = service_items
 
         description = attrs.get('description')
         if not description:
@@ -204,7 +338,9 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         location_payload = validated_data.pop('location_payload', None)
+        service_items_payload = validated_data.pop('service_items_payload', None)
         request_obj = ServiceRequest.objects.create(**validated_data)
+        self._sync_service_items(request_obj, service_items_payload)
         if location_payload:
             ServiceLocation.objects.update_or_create(
                 request=request_obj,
@@ -214,9 +350,13 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         location_payload = validated_data.pop('location_payload', None)
+        service_items_payload = validated_data.pop('service_items_payload', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+
+        if service_items_payload is not None:
+            self._sync_service_items(instance, service_items_payload)
 
         if location_payload:
             ServiceLocation.objects.update_or_create(
@@ -226,15 +366,63 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
 
         return instance
 
+    def _sync_service_items(self, request_obj, service_types):
+        if not service_types:
+            service_types = [request_obj.service_type]
+
+        ServiceRequestService.objects.filter(request=request_obj).exclude(
+            service_type__in=service_types
+        ).delete()
+        for index, service_type in enumerate(service_types):
+            ServiceRequestService.objects.update_or_create(
+                request=request_obj,
+                service_type=service_type,
+                defaults={
+                    'sort_order': index,
+                    'status': request_obj.status,
+                },
+            )
+
+    def _get_service_item_data(self, obj):
+        items = list(obj.service_items.select_related('service_type').order_by('sort_order', 'id'))
+        if not items and obj.service_type_id:
+            items = [
+                ServiceRequestService(
+                    request=obj,
+                    service_type=obj.service_type,
+                    status=obj.status,
+                    sort_order=0,
+                )
+            ]
+        return ServiceRequestServiceSerializer(items, many=True).data
+
+    def get_service_items(self, obj):
+        return self._get_service_item_data(obj)
+
+    def get_service_summary(self, obj):
+        names = [
+            item['service_type_name']
+            for item in self._get_service_item_data(obj)
+            if item.get('service_type_name')
+        ]
+        return ', '.join(names) or (obj.service_type.name if obj.service_type_id else '')
+
     def get_sla(self, obj):
         return serialize_sla_evaluation(evaluate_service_request_sla(obj))
-    
+
+    def get_client_fullname(self, obj):
+        if not obj.client:
+            return ''
+        return obj.client.get_full_name().strip() or obj.client.username
+
     class Meta:
         model = ServiceRequest
         fields = [
-            'id', 'client', 'client_name', 'service_type', 'service_type_name',
+            'id', 'client', 'client_name', 'client_fullname', 'service_type', 'service_type_name',
+            'service_types', 'service_items', 'service_summary',
             'description', 'priority', 'status', 'preferred_date',
-            'preferred_time_slot', 'scheduling_notes', 'request_date', 'updated_at',
+            'preferred_time_slot', 'request_source', 'request_source_label',
+            'scheduling_notes', 'request_date', 'updated_at',
             'auto_ticket_created', 'location', 'sla', 'service', 'notes', 'lat', 'lng',
             'locationDesc', 'location_address', 'location_city',
             'location_province', 'latitude', 'longitude'
@@ -248,36 +436,40 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
 
 
 class TechnicianSkillSerializer(serializers.ModelSerializer):
-    technician_name = serializers.CharField(source='technician.username', read_only=True)
+    technician_name = serializers.SerializerMethodField()
     service_type_name = serializers.CharField(source='service_type.name', read_only=True)
-    
+
+    def get_technician_name(self, obj):
+        lab = client_technician_label(obj.technician)
+        return lab if lab is not None else ''
+
     class Meta:
         model = TechnicianSkill
         fields = ['id', 'service_type', 'service_type_name', 'skill_level', 'technician_name', 'technician']
         read_only_fields = ['id', 'technician_name', 'technician']
-    
+
     def validate(self, attrs):
         """Check for duplicate skills"""
         technician = self.context.get('request').user
         service_type = attrs.get('service_type')
-        
+
         # If updating, allow same skill
         if self.instance:
             if self.instance.service_type == service_type and self.instance.technician == technician:
                 return attrs
-        
+
         # Check if this skill already exists for this technician
         if TechnicianSkill.objects.filter(technician=technician, service_type=service_type).exists():
             raise serializers.ValidationError(
                 f"You already have this skill. Update the existing skill level instead."
             )
-        
+
         return attrs
 
 
 class ServiceStatusHistorySerializer(serializers.ModelSerializer):
     changed_by_name = serializers.CharField(source='changed_by.username', read_only=True)
-    
+
     class Meta:
         model = ServiceStatusHistory
         fields = '__all__'
@@ -285,6 +477,7 @@ class ServiceStatusHistorySerializer(serializers.ModelSerializer):
 
 class InspectionChecklistSerializer(serializers.ModelSerializer):
     completed_by_name = serializers.CharField(source='completed_by.username', read_only=True)
+    submitted_by_name = serializers.CharField(source='submitted_by.username', read_only=True)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -353,6 +546,24 @@ class InspectionChecklistSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'proof_media': 'Proof media must be provided as a list.',
             })
+        checklist_items = attrs.get(
+            'checklist_items',
+            getattr(self.instance, 'checklist_items', []),
+        )
+        required_equipment_snapshot = attrs.get(
+            'required_equipment_snapshot',
+            getattr(self.instance, 'required_equipment_snapshot', []),
+        )
+
+        if checklist_items and not isinstance(checklist_items, list):
+            raise serializers.ValidationError({
+                'checklist_items': 'Checklist items must be provided as a list.',
+            })
+
+        if required_equipment_snapshot and not isinstance(required_equipment_snapshot, list):
+            raise serializers.ValidationError({
+                'required_equipment_snapshot': 'Required equipment must be provided as a list.',
+            })
 
         if follow_up_required and not follow_up_case_type:
             raise serializers.ValidationError({
@@ -380,7 +591,7 @@ class InspectionChecklistSerializer(serializers.ModelSerializer):
             })
 
         return attrs
-    
+
     class Meta:
         model = InspectionChecklist
         fields = '__all__'
@@ -388,21 +599,134 @@ class InspectionChecklistSerializer(serializers.ModelSerializer):
 
 class TechnicianLocationHistorySerializer(serializers.ModelSerializer):
     technician_name = serializers.CharField(source='technician.username', read_only=True)
-    
+
     class Meta:
         model = TechnicianLocationHistory
         fields = '__all__'
 
 
+class ServiceTicketReportSerializer(serializers.ModelSerializer):
+    """Serializer for Service Ticket Report with proper display names"""
+    client = serializers.SerializerMethodField()
+    client_fullname = serializers.SerializerMethodField()
+    service = serializers.SerializerMethodField()
+    priority = serializers.CharField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    sla = serializers.SerializerMethodField()
+    dispatch_status = serializers.SerializerMethodField()
+    dispatch_label = serializers.SerializerMethodField()
+    dispatch_action = serializers.SerializerMethodField()
+    is_missed_dispatch = serializers.SerializerMethodField()
+    missed_dispatch_at = serializers.SerializerMethodField()
+    dispatch_overdue_days = serializers.SerializerMethodField()
+    technician_id = serializers.SerializerMethodField()
+    technician_fullname = serializers.SerializerMethodField()
+    next_step = serializers.SerializerMethodField()
+
+    def get_client(self, obj):
+        """Return client username/ID"""
+        return obj.request.client.username if obj.request and obj.request.client else "—"
+
+    def get_client_fullname(self, obj):
+        """Return client's full name"""
+        if obj.request and obj.request.client:
+            client = obj.request.client
+            full_name = f"{client.first_name or ''} {client.last_name or ''}".strip()
+            return full_name or client.username
+        return "—"
+
+    def get_service(self, obj):
+        if not obj.request_id or not obj.request:
+            return 'Unknown'
+        items = list(obj.request.service_items.select_related('service_type').order_by('sort_order', 'id'))
+        names = [item.service_type.name for item in items if item.service_type_id]
+        return ', '.join(names) or (obj.request.service_type.name if obj.request.service_type_id else 'Unknown')
+
+    def get_sla(self, obj):
+        """Return SLA status"""
+        from .sla import evaluate_service_ticket_sla, serialize_sla_evaluation
+        sla_evaluation = evaluate_service_ticket_sla(obj)
+        return serialize_sla_evaluation(sla_evaluation)
+
+    def _dispatch_state(self, obj):
+        return get_ticket_dispatch_state(obj)
+
+    def get_dispatch_status(self, obj):
+        return self._dispatch_state(obj)['status']
+
+    def get_dispatch_label(self, obj):
+        return self._dispatch_state(obj)['label']
+
+    def get_dispatch_action(self, obj):
+        return self._dispatch_state(obj)['action']
+
+    def get_is_missed_dispatch(self, obj):
+        return self._dispatch_state(obj)['is_missed_dispatch']
+
+    def get_missed_dispatch_at(self, obj):
+        return self._dispatch_state(obj)['missed_dispatch_at']
+
+    def get_dispatch_overdue_days(self, obj):
+        return self._dispatch_state(obj)['overdue_days']
+
+    def get_technician_id(self, obj):
+        """Return technician ID"""
+        return obj.technician.id if obj.technician else None
+
+    def get_technician_fullname(self, obj):
+        """Return technician's full name or — if null"""
+        lab = client_technician_label(obj.technician) if obj.technician else None
+        return lab or "—"
+
+    def get_next_step(self, obj):
+        """Return next step based on ticket status"""
+        dispatch_state = self._dispatch_state(obj)
+        if dispatch_state['is_missed_dispatch']:
+            return dispatch_state['action']
+        if obj.status == 'Not Started':
+            return "Assign technician"
+        elif obj.status == 'In Progress':
+            return "Complete work"
+        elif obj.status == 'Completed':
+            return "Awaiting feedback"
+        elif obj.status == 'On Hold':
+            return "Resolve hold issue"
+        else:
+            return "Review status"
+
+    class Meta:
+        model = ServiceTicket
+        fields = [
+            'id', 'created_at', 'client', 'client_fullname', 'service', 'priority', 'status',
+            'sla', 'dispatch_status', 'dispatch_label', 'dispatch_action', 'is_missed_dispatch',
+            'missed_dispatch_at', 'dispatch_overdue_days', 'technician_id', 'technician_fullname',
+            'next_step',
+        ]
+
+
 class ServiceTicketSerializer(serializers.ModelSerializer):
     request_details = ServiceRequestSerializer(source='request', read_only=True)
-    technician_name = serializers.CharField(source='technician.username', read_only=True)
+    technician_name = serializers.SerializerMethodField()
+    technician_fullname = serializers.SerializerMethodField()
+    client_id = serializers.SerializerMethodField()
+    client_fullname = serializers.SerializerMethodField()
+    assigned_by_id = serializers.SerializerMethodField()
+    assigned_by_name = serializers.SerializerMethodField()
+    assigned_by_role = serializers.SerializerMethodField()
     supervisor_name = serializers.CharField(source='supervisor.username', read_only=True)
     status_history = ServiceStatusHistorySerializer(many=True, read_only=True)
     inspection = InspectionChecklistSerializer(read_only=True)
     inventory_reservations = serializers.SerializerMethodField()
     crew_members = serializers.SerializerMethodField()
     sla = serializers.SerializerMethodField()
+    dispatch_status = serializers.SerializerMethodField()
+    dispatch_label = serializers.SerializerMethodField()
+    dispatch_action = serializers.SerializerMethodField()
+    is_missed_dispatch = serializers.SerializerMethodField()
+    missed_dispatch_at = serializers.SerializerMethodField()
+    dispatch_overdue_days = serializers.SerializerMethodField()
+    maintenance_schedule = serializers.SerializerMethodField()
+    after_sales_cases = serializers.SerializerMethodField()
 
     def get_inventory_reservations(self, obj):
         return [
@@ -415,7 +739,11 @@ class ServiceTicketSerializer(serializers.ModelSerializer):
                 'status': reservation.status,
                 'required_date': reservation.required_date,
                 'technician_id': reservation.technician_id,
-                'technician_name': reservation.technician.username,
+                'technician_name': (
+                    (client_technician_label(reservation.technician) or '')
+                    if reservation.technician_id
+                    else ''
+                ),
                 'notes': reservation.notes,
             }
             for reservation in obj.inventory_reservations.select_related('item', 'technician').order_by('id')
@@ -426,14 +754,110 @@ class ServiceTicketSerializer(serializers.ModelSerializer):
             {
                 'id': assignment.technician_id,
                 'username': assignment.technician.username,
-                'name': assignment.technician.get_full_name().strip() or assignment.technician.username,
+                'name': (
+                    client_technician_label(assignment.technician)
+                    or assignment.technician.username
+                ),
             }
             for assignment in obj.crew_assignments.select_related('technician').order_by('created_at', 'id')
         ]
 
     def get_sla(self, obj):
         return serialize_sla_evaluation(evaluate_service_ticket_sla(obj))
-    
+
+    def _dispatch_state(self, obj):
+        return get_ticket_dispatch_state(obj)
+
+    def get_dispatch_status(self, obj):
+        return self._dispatch_state(obj)['status']
+
+    def get_dispatch_label(self, obj):
+        return self._dispatch_state(obj)['label']
+
+    def get_dispatch_action(self, obj):
+        return self._dispatch_state(obj)['action']
+
+    def get_is_missed_dispatch(self, obj):
+        return self._dispatch_state(obj)['is_missed_dispatch']
+
+    def get_missed_dispatch_at(self, obj):
+        return self._dispatch_state(obj)['missed_dispatch_at']
+
+    def get_dispatch_overdue_days(self, obj):
+        return self._dispatch_state(obj)['overdue_days']
+
+    def get_maintenance_schedule(self, obj):
+        try:
+            schedule = obj.maintenance_schedule
+        except MaintenanceSchedule.DoesNotExist:
+            return None
+
+        return {
+            'id': schedule.id,
+            'maintenance_profile': schedule.maintenance_profile,
+            'interval_days': schedule.interval_days,
+            'next_due_date': schedule.next_due_date,
+            'notify_on_date': schedule.notify_on_date,
+            'status': schedule.status,
+            'maintenance_notes': schedule.maintenance_notes,
+            'risk_level': schedule.risk_level,
+        }
+
+    def get_after_sales_cases(self, obj):
+        return [
+            {
+                'id': case.id,
+                'case_type': case.case_type,
+                'status': case.status,
+                'priority': case.priority,
+                'summary': case.summary,
+                'due_date': case.due_date,
+                'creation_source': case.creation_source,
+            }
+            for case in obj.after_sales_cases.order_by('-created_at')[:5]
+        ]
+
+    def get_technician_name(self, obj):
+        lab = client_technician_label(obj.technician) if obj.technician_id else None
+        return lab if lab is not None else ''
+
+    def get_technician_fullname(self, obj):
+        lab = client_technician_label(obj.technician) if obj.technician_id else None
+        return lab if lab is not None else ''
+
+    def get_client_id(self, obj):
+        return obj.request.client_id if obj.request_id and obj.request else None
+
+    def get_client_fullname(self, obj):
+        if not obj.request_id or not obj.request or not obj.request.client:
+            return ''
+        return obj.request.client.get_full_name().strip() or obj.request.client.username
+
+    def _get_assignment_history(self, obj):
+        return (
+            obj.status_history
+            .select_related('changed_by')
+            .filter(notes__icontains='assigned')
+            .order_by('-timestamp')
+            .first()
+        )
+
+    def get_assigned_by_id(self, obj):
+        assignment_history = self._get_assignment_history(obj)
+        return assignment_history.changed_by_id if assignment_history else None
+
+    def get_assigned_by_name(self, obj):
+        assignment_history = self._get_assignment_history(obj)
+        actor = assignment_history.changed_by if assignment_history else None
+        if not actor:
+            return ''
+        return actor.get_full_name().strip() or actor.username
+
+    def get_assigned_by_role(self, obj):
+        assignment_history = self._get_assignment_history(obj)
+        actor = assignment_history.changed_by if assignment_history else None
+        return getattr(actor, 'role', '') if actor else ''
+
     class Meta:
         model = ServiceTicket
         fields = '__all__'
@@ -441,18 +865,46 @@ class ServiceTicketSerializer(serializers.ModelSerializer):
 
 
 class FollowUpCaseSerializer(serializers.ModelSerializer):
+    client_id = serializers.IntegerField(source='client.id', read_only=True)
     client_name = serializers.CharField(source='client.username', read_only=True)
+    client_full_name = serializers.SerializerMethodField()
     client_email = serializers.CharField(source='client.email', read_only=True)
     client_phone = serializers.CharField(source='client.phone', read_only=True)
-    assigned_to_name = serializers.CharField(source='assigned_to.username', read_only=True)
-    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    assigned_to_id = serializers.IntegerField(source='assigned_to.id', read_only=True, allow_null=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.username', read_only=True, allow_null=True)
+    assigned_to_full_name = serializers.SerializerMethodField()
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True, allow_null=True)
     service_type_name = serializers.CharField(source='service_ticket.request.service_type.name', read_only=True)
     service_address = serializers.SerializerMethodField()
+    ticket_id = serializers.IntegerField(source='service_ticket.id', read_only=True)
     ticket_status = serializers.CharField(source='service_ticket.status', read_only=True)
     ticket_completed_date = serializers.DateTimeField(source='service_ticket.completed_date', read_only=True)
     ticket_warranty_status = serializers.CharField(source='service_ticket.warranty_status', read_only=True)
     ticket_warranty_end_date = serializers.DateField(source='service_ticket.warranty_end_date', read_only=True)
+    technician_id = serializers.IntegerField(source='service_ticket.technician.id', read_only=True, allow_null=True)
+    technician_name = serializers.SerializerMethodField()
+    technician_full_name = serializers.SerializerMethodField()
     creation_source_label = serializers.CharField(source='get_creation_source_display', read_only=True)
+
+    def get_client_full_name(self, obj):
+        return f"{obj.client.first_name} {obj.client.last_name}".strip() or obj.client.username
+
+    def get_assigned_to_full_name(self, obj):
+        if obj.assigned_to:
+            return f"{obj.assigned_to.first_name} {obj.assigned_to.last_name}".strip() or obj.assigned_to.username
+        return None
+
+    def get_technician_name(self, obj):
+        st = getattr(obj, 'service_ticket', None)
+        if not st or not st.technician_id:
+            return None
+        return client_technician_label(st.technician)
+
+    def get_technician_full_name(self, obj):
+        st = getattr(obj, 'service_ticket', None)
+        if not st or not st.technician_id:
+            return None
+        return client_technician_label(st.technician)
 
     def get_service_address(self, obj):
         try:
@@ -478,7 +930,7 @@ class AutoAssignSerializer(serializers.Serializer):
 # Analytics Serializers
 class ServiceAnalyticsSerializer(serializers.ModelSerializer):
     service_type_name = serializers.CharField(source='service_type.name', read_only=True)
-    
+
     class Meta:
         model = ServiceAnalytics
         fields = [
@@ -491,7 +943,7 @@ class ServiceAnalyticsSerializer(serializers.ModelSerializer):
 
 class TechnicianPerformanceSerializer(serializers.ModelSerializer):
     technician_name = serializers.CharField(source='technician.username', read_only=True)
-    
+
     class Meta:
         model = TechnicianPerformance
         fields = [
@@ -505,7 +957,7 @@ class TechnicianPerformanceSerializer(serializers.ModelSerializer):
 
 class DemandForecastSerializer(serializers.ModelSerializer):
     service_type_name = serializers.CharField(source='service_type.name', read_only=True)
-    
+
     class Meta:
         model = DemandForecast
         fields = [
@@ -517,7 +969,7 @@ class DemandForecastSerializer(serializers.ModelSerializer):
 
 class ServiceTrendSerializer(serializers.ModelSerializer):
     service_type_name = serializers.CharField(source='service_type.name', read_only=True)
-    
+
     class Meta:
         model = ServiceTrend
         fields = [

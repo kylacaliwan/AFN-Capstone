@@ -1,6 +1,5 @@
 
-from django.db import models
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -50,36 +49,35 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         elif self.action in ['list', 'retrieve']:
             return [IsAdminOrSupervisorOrTechnician()]
         return [permissions.IsAuthenticated()]
-    
+
     def get_queryset(self):
         queryset = InventoryItem.objects.all()
-        
+
         # Filter by category
         category = self.request.query_params.get('category')
         if category:
             queryset = queryset.filter(category_id=category)
-        
+
         # Filter by status
         item_status = self.request.query_params.get('status')
         if item_status:
             queryset = queryset.filter(status=item_status)
-        
+
         # Filter low stock items
         low_stock = self.request.query_params.get('low_stock')
         if low_stock == 'true':
-            queryset = queryset.filter(quantity__lte=models.F('minimum_stock'))
-        
+            low_stock_ids = [item.id for item in queryset if item.is_low_stock]
+            queryset = InventoryItem.objects.filter(id__in=low_stock_ids)
+
         return queryset
-    
+
     @action(detail=False, methods=['get'])
     def low_stock(self, request):
         """Get items with low stock"""
-        items = InventoryItem.objects.filter(
-            quantity__lte=models.F('minimum_stock')
-        )
+        items = [item for item in InventoryItem.objects.all() if item.is_low_stock]
         serializer = self.get_serializer(items, many=True)
         return Response(serializer.data)
-    
+
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Get inventory statistics"""
@@ -90,10 +88,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             total=Sum('total_value')
         )['total'] or 0
 
-        # Database-level aggregation — no Python loop needed
-        low_stock_count = InventoryItem.objects.filter(
-            quantity__lte=models.F('minimum_stock')
-        ).count()
+        low_stock_count = sum(1 for item in InventoryItem.objects.all() if item.is_low_stock)
 
         out_of_stock = InventoryItem.objects.filter(quantity=0).count()
 
@@ -136,7 +131,7 @@ class InventoryTransactionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(performed_by=self.request.user)
-    
+
     @action(detail=False, methods=['get'])
     def recent(self, request):
         """Get recent transactions"""
@@ -144,7 +139,7 @@ class InventoryTransactionViewSet(viewsets.ModelViewSet):
         transactions = self.get_queryset().order_by('-id')[:limit]
         serializer = self.get_serializer(transactions, many=True)
         return Response(serializer.data)
-    
+
     @action(detail=False, methods=['get'])
     def by_item(self, request):
         """Get transactions for a specific item — respects role-based filtering"""
@@ -190,7 +185,7 @@ class InventoryReservationViewSet(viewsets.ModelViewSet):
         output_serializer = self.get_serializer(reservation)
         headers = self.get_success_headers(output_serializer.data)
         return Response(output_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-    
+
     @action(detail=True, methods=['post'])
     def fulfill(self, request, pk=None):
         """Mark reservation as fulfilled and issue items"""
@@ -205,7 +200,7 @@ class InventoryReservationViewSet(viewsets.ModelViewSet):
             notes=f"Fulfilling reservation #{reservation.id}",
         )
         return Response({'status': 'Reservation fulfilled'})
-    
+
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
         """Cancel reservation"""
@@ -220,7 +215,7 @@ class InventoryReservationViewSet(viewsets.ModelViewSet):
             notes=f"Cancelled reservation #{reservation.id}",
         )
         return Response({'status': 'Reservation cancelled'})
-    
+
     @action(detail=False, methods=['get'])
     def pending(self, request):
         """Get all pending reservations"""
@@ -238,4 +233,3 @@ class ServiceTypeInventoryRequirementViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [CanManageInventory()]
         return [IsAdminOrSupervisorOrTechnician()]
-

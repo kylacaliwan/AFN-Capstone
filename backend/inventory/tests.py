@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -9,7 +10,14 @@ from inventory.models import (
     InventoryTransaction,
     ServiceTypeInventoryRequirement,
 )
-from services.models import ServiceLocation, ServiceRequest, ServiceTicket, ServiceType
+from services.models import (
+    InspectionChecklist,
+    ServiceLocation,
+    ServiceRequest,
+    ServiceTicket,
+    ServiceType,
+    TechnicianSkill,
+)
 from users.models import User
 
 
@@ -60,6 +68,16 @@ class AutoInventoryWorkflowTests(APITestCase):
             name='Sensor Maintenance',
             description='Maintenance service needing sensors',
             estimated_duration=90,
+        )
+        TechnicianSkill.objects.create(
+            technician=self.technician_user,
+            service_type=self.service_type,
+            skill_level='expert',
+        )
+        TechnicianSkill.objects.create(
+            technician=self.crew_technician,
+            service_type=self.service_type,
+            skill_level='intermediate',
         )
         ServiceTypeInventoryRequirement.objects.create(
             service_type=self.service_type,
@@ -173,6 +191,12 @@ class AutoInventoryWorkflowTests(APITestCase):
             format='json',
         )
         self.assertEqual(start_response.status_code, status.HTTP_200_OK)
+        InspectionChecklist.objects.create(
+            ticket=self.ticket,
+            is_completed=True,
+            completed_at=timezone.now(),
+            completed_by=self.technician_user,
+        )
 
         complete_response = self.client.post(
             f'/api/services/service-tickets/{self.ticket.id}/complete_work/',
@@ -193,3 +217,78 @@ class AutoInventoryWorkflowTests(APITestCase):
                 transaction_type='issue',
             ).exists()
         )
+
+    def test_completion_can_issue_confirmed_partial_inventory_usage(self):
+        assign_response = self.assign_ticket()
+        self.assertEqual(assign_response.status_code, status.HTTP_200_OK)
+
+        reservation = InventoryReservation.objects.get(service_ticket=self.ticket)
+        self.client.force_authenticate(user=self.technician_user)
+        self.client.post(
+            f'/api/services/service-tickets/{self.ticket.id}/start_work/',
+            {},
+            format='json',
+        )
+        InspectionChecklist.objects.create(
+            ticket=self.ticket,
+            is_completed=True,
+            completed_at=timezone.now(),
+            completed_by=self.technician_user,
+        )
+
+        complete_response = self.client.post(
+            f'/api/services/service-tickets/{self.ticket.id}/complete_work/',
+            {
+                'inventory_usage': [
+                    {'reservation_id': reservation.id, 'quantity_used': 1},
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(complete_response.status_code, status.HTTP_200_OK)
+        reservation.refresh_from_db()
+        self.inventory_item.refresh_from_db()
+
+        self.assertEqual(reservation.status, 'fulfilled')
+        self.assertEqual(reservation.quantity, 1)
+        self.assertEqual(self.inventory_item.quantity, 9)
+        self.assertEqual(self.inventory_item.reserved_quantity, 0)
+        self.assertTrue(
+            InventoryTransaction.objects.filter(
+                service_ticket=self.ticket,
+                transaction_type='cancellation',
+            ).exists()
+        )
+
+    def test_editing_transaction_metadata_does_not_apply_stock_movement_again(self):
+        transaction = InventoryTransaction.objects.create(
+            item=self.inventory_item,
+            transaction_type='issue',
+            quantity=2,
+            performed_by=self.admin_user,
+        )
+        self.inventory_item.refresh_from_db()
+        self.assertEqual(self.inventory_item.quantity, 8)
+
+        transaction.notes = 'Corrected reference note'
+        transaction.save()
+
+        self.inventory_item.refresh_from_db()
+        self.assertEqual(self.inventory_item.quantity, 8)
+
+    def test_transaction_stock_fields_are_immutable_after_creation(self):
+        transaction = InventoryTransaction.objects.create(
+            item=self.inventory_item,
+            transaction_type='reservation',
+            quantity=2,
+            performed_by=self.admin_user,
+        )
+
+        transaction.quantity = 3
+
+        with self.assertRaises(ValidationError):
+            transaction.save()
+
+        self.inventory_item.refresh_from_db()
+        self.assertEqual(self.inventory_item.reserved_quantity, 2)

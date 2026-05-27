@@ -4,8 +4,10 @@ from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
+from notifications.sla_notifications import notify_supervisors_ticket_escalation
 from notifications.firebase_utils import send_team_notification
 from notifications.models import FirebaseToken, Notification
+from services.models import ServiceLocation, ServiceRequest, ServiceTicket, ServiceType
 from users.models import User
 
 
@@ -90,6 +92,11 @@ class NotificationViewSetTests(APITestCase):
         self.assertEqual(notification.status, 'read')
         self.assertIsNotNone(notification.read_at)
         self.assertIsNotNone(response.data['read_at'])
+
+    def test_mark_read_missing_notification_is_noop(self):
+        response = self.client.post('/api/notifications/999999/mark_read/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data.get('status'), 'noop')
 
     def test_mark_all_read_updates_unread_notifications(self):
         first = Notification.objects.create(
@@ -203,3 +210,61 @@ class NotificationUtilityTests(APITestCase):
                 'Unsafe Broadcast',
                 'This should not go to everyone by accident.',
             )
+
+    @patch('notifications.firebase_utils.send_push_notification', return_value=True)
+    def test_notify_supervisors_ticket_escalation_creates_warning_notifications(self, mock_send_push):
+        admin_user = User.objects.create_user(
+            username='notif_admin',
+            email='notif-admin@example.com',
+            password='Password123!',
+            role='admin'
+        )
+        operations_admin = User.objects.create_user(
+            username='notif_operations_admin',
+            email='notif-operations-admin@example.com',
+            password='Password123!',
+            role='admin'
+        )
+        service_type = ServiceType.objects.create(name='Escalation Service')
+        request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=service_type,
+            description='Escalation scenario',
+            status='Approved',
+        )
+        ServiceLocation.objects.create(
+            request=request_obj,
+            address='123 Escalation Ave',
+            city='Pasig',
+            province='Metro Manila',
+        )
+        ticket = ServiceTicket.objects.create(
+            request=request_obj,
+            technician=self.tech_one,
+            supervisor=operations_admin,
+            scheduled_date=request_obj.request_date.date(),
+            status='Not Started',
+            priority='Urgent',
+        )
+
+        notify_supervisors_ticket_escalation(
+            ticket,
+            'start_overdue',
+            {
+                'minutes_overdue': 30,
+                'action_required': 'Start work',
+            },
+        )
+
+        notifications = Notification.objects.filter(
+            ticket=ticket,
+            type='warning',
+            title=f'Ticket #{ticket.id} start time SLA breached',
+        )
+
+        self.assertEqual(notifications.count(), 2)
+        self.assertSetEqual(
+            set(notifications.values_list('user_id', flat=True)),
+            {admin_user.id, operations_admin.id},
+        )
+        self.assertEqual(mock_send_push.call_count, 2)

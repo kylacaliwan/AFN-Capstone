@@ -3,7 +3,7 @@ from rest_framework import routers
 from .views import TicketProgressViewSet
 
 router = routers.DefaultRouter()
-router.register(r'progress', TicketProgressViewSet)
+router.register(r'ticket-progress', TicketProgressViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),

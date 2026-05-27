@@ -41,16 +41,16 @@ class IsAdmin(permissions.BasePermission):
 
 
 class IsFollowUp(permissions.BasePermission):
-    """Only service follow-up users can access."""
+    """Only follow-up users can access (deprecated - now handled by admin roles)"""
 
     def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated and request.user.role == 'follow_up'
+        return request.user and request.user.is_authenticated and is_admin_workspace_role(request.user.role)
 
 
 class IsSupervisor(permissions.BasePermission):
-    """Only supervisor users can access"""
+    """Only supervisor users can access (deprecated - now handled by admin roles)"""
     def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated and request.user.role == 'supervisor'
+        return request.user and request.user.is_authenticated and is_admin_workspace_role(request.user.role)
 
 
 class IsTechnician(permissions.BasePermission):
@@ -66,20 +66,23 @@ class IsClient(permissions.BasePermission):
 
 
 class IsAdminOrSupervisor(permissions.BasePermission):
-    """Admin or supervisor can access"""
+    """Admin workspace users can access."""
     def has_permission(self, request, view):
-        return (request.user and request.user.is_authenticated and
-                (is_admin_workspace_role(request.user.role) or request.user.role == 'supervisor'))
+        return (
+            request.user and
+            request.user.is_authenticated and
+            is_admin_workspace_role(request.user.role)
+        )
 
 
 class IsSuperadminOrSupervisor(permissions.BasePermission):
-    """Superadmin or supervisor can access."""
+    """Superadmin can access."""
 
     def has_permission(self, request, view):
         return (
             request.user and
             request.user.is_authenticated and
-            (is_superadmin_role(request.user.role) or request.user.role == 'supervisor')
+            is_superadmin_role(request.user.role)
         )
 
 
@@ -90,15 +93,15 @@ class IsAdminOrFollowUp(permissions.BasePermission):
         return (
             request.user and
             request.user.is_authenticated and
-            (is_admin_workspace_role(request.user.role) or request.user.role == 'follow_up')
+            is_admin_workspace_role(request.user.role)
         )
 
 
 class IsAdminOrSupervisorOrTechnician(permissions.BasePermission):
-    """Admin, supervisor, or technician can access"""
+    """Admin workspace users or technicians can access."""
     def has_permission(self, request, view):
         return (request.user and request.user.is_authenticated and
-                (is_admin_workspace_role(request.user.role) or request.user.role in ['supervisor', 'technician']))
+                (is_admin_workspace_role(request.user.role) or request.user.role == 'technician'))
 
 
 class IsOwnerOrAdmin(permissions.BasePermission):
@@ -114,8 +117,6 @@ class CanViewService(permissions.BasePermission):
         user = request.user
         if is_admin_workspace_role(user.role):
             return True
-        elif user.role == 'supervisor':
-            return True
         elif user.role == 'technician':
             return obj.technician == user
         elif user.role == 'client':
@@ -128,11 +129,11 @@ class CanManageInventory(permissions.BasePermission):
     def has_permission(self, request, view):
         user = request.user
         if request.method in permissions.SAFE_METHODS:
-            # Read operations allowed for admin, supervisor, technician
-            return user and user.is_authenticated and (is_admin_workspace_role(user.role) or user.role in ['supervisor', 'technician'])
+            # Read operations allowed for admin, technician
+            return user and user.is_authenticated and (is_admin_workspace_role(user.role) or user.role == 'technician')
         else:
-            # Write operations only for admin and supervisor
-            return user and user.is_authenticated and (is_admin_workspace_role(user.role) or user.role == 'supervisor')
+            # Write operations only for admin
+            return user and user.is_authenticated and is_admin_workspace_role(user.role)
 
 
 class CanViewNotifications(permissions.BasePermission):
@@ -149,21 +150,14 @@ class CanManageUsers(permissions.BasePermission):
 
 
 class CanManageStaffCapabilities(permissions.BasePermission):
-    """Admins and approved managers can grant staff capabilities."""
+    """Only the superadmin can grant and revoke staff/admin capabilities."""
 
     def has_permission(self, request, view):
-        return (
-            request.user and
-            request.user.is_authenticated and
-            (
-                is_superadmin_role(request.user.role) or
-                user_has_capability(request.user, MANAGE_STAFF_CAPABILITIES)
-            )
-        )
+        return request.user and request.user.is_authenticated and is_superadmin_role(request.user.role)
 
 
 class CanViewUserDirectory(permissions.BasePermission):
-    """Allow superadmins, approved admins, and delegated supervisors to view user lists."""
+    """Allow superadmins and approved admins to view user lists."""
 
     def has_permission(self, request, view):
         return (
@@ -174,26 +168,19 @@ class CanViewUserDirectory(permissions.BasePermission):
                 (
                     request.user.role == 'admin' and
                     user_has_any_capability(request.user, USER_DIRECTORY_VIEW_CAPABILITIES)
-                ) or
-                user_has_capability(request.user, MANAGE_STAFF_CAPABILITIES)
+                )
             )
         )
 
 
 class CanManageServiceRequests(permissions.BasePermission):
-    """Admins or supervisors with ticket-queue access can manage requests."""
+    """Admin workspace users can manage requests."""
 
     def has_permission(self, request, view):
         return (
             request.user and
             request.user.is_authenticated and
-            (
-                is_admin_workspace_role(request.user.role) or
-                (
-                    request.user.role == 'supervisor' and
-                    user_has_capability(request.user, SUPERVISOR_TICKETS_VIEW)
-                )
-            )
+            is_admin_workspace_role(request.user.role)
         )
 
 

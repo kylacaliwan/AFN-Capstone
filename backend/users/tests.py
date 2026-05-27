@@ -1,4 +1,6 @@
 import re
+from datetime import datetime
+from unittest.mock import patch
 
 from rest_framework import status
 from rest_framework.authtoken.models import Token
@@ -10,7 +12,7 @@ from django.test import override_settings
 from django.utils import timezone
 
 from services.models import ServiceLocation, ServiceRequest, ServiceTicket, ServiceType, TechnicianSkill
-from .models import AdminSettings, User, UserCapabilityGrant
+from .models import AdminSettings, ChangeLog, User, UserCapabilityGrant
 from .rbac import (
     AFTER_SALES_CASES_MANAGE,
     AFTER_SALES_CASES_VIEW,
@@ -32,7 +34,7 @@ class UserRegistrationTests(APITestCase):
         self.register_url = '/api/users/register/'
         self.user_create_url = '/api/admin/users/'
 
-    def test_public_registration_cannot_create_admin_when_no_admin_exists(self):
+    def test_public_registration_rejects_admin_when_no_admin_exists(self):
         payload = {
             'username': 'admin1',
             'email': 'admin1@example.com',
@@ -44,10 +46,10 @@ class UserRegistrationTests(APITestCase):
             'role': 'admin'
         }
         response = self.client.post(self.register_url, payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(User.objects.get(username='admin1').role, 'client')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(User.objects.filter(username='admin1').exists())
 
-    def test_public_registration_cannot_create_admin_when_admin_exists(self):
+    def test_public_registration_rejects_admin_when_admin_exists(self):
         User.objects.create_user(
             username='existing_admin',
             email='existing_admin@example.com',
@@ -68,9 +70,8 @@ class UserRegistrationTests(APITestCase):
             'admin_scope': 'task_management'
         }
         response = self.client.post(self.register_url, payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        new_admin = User.objects.get(username='admin2')
-        self.assertEqual(new_admin.role, 'client')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(User.objects.filter(username='admin2').exists())
 
     def test_superadmin_user_can_create_additional_admin(self):
         superadmin_user = User.objects.create_user(
@@ -96,7 +97,7 @@ class UserRegistrationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(User.objects.get(username='admin3').role, 'admin')
 
-    def test_superadmin_user_can_create_follow_up_user(self):
+    def test_superadmin_user_cannot_create_removed_follow_up_role(self):
         superadmin_user = User.objects.create_user(
             username='existing_owner_two',
             email='existing_owner_two@example.com',
@@ -117,10 +118,8 @@ class UserRegistrationTests(APITestCase):
         }
 
         response = self.client.post(self.user_create_url, payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        user = User.objects.get(username='followup1')
-        self.assertEqual(user.role, 'follow_up')
-        self.assertEqual(user.admin_scope, 'service_follow_up')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(User.objects.filter(username='followup1').exists())
 
     def test_superadmin_user_can_deactivate_user(self):
         superadmin_user = User.objects.create_user(
@@ -561,17 +560,17 @@ class AdminUserManagementTests(APITestCase):
 
     def test_superadmin_can_create_internal_user_with_selected_role(self):
         response = self.client.post('/api/admin/users/', {
-            'username': 'created_supervisor',
-            'email': 'created_supervisor@example.com',
+            'username': 'created_operations_admin',
+            'email': 'created_operations_admin@example.com',
             'password': 'Password123!',
             'password_confirm': 'Password123!',
-            'role': 'supervisor'
+            'role': 'admin'
         }, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        created_user = User.objects.get(username='created_supervisor')
-        self.assertEqual(created_user.role, 'supervisor')
-        self.assertEqual(response.data['role'], 'supervisor')
+        created_user = User.objects.get(username='created_operations_admin')
+        self.assertEqual(created_user.role, 'admin')
+        self.assertEqual(response.data['role'], 'admin')
         self.assertTrue(created_user.is_active)
         self.assertEqual(created_user.status, 'active')
 
@@ -719,6 +718,93 @@ class AdminAnalyticsTests(APITestCase):
         self.assertEqual(response.data['topRequestedServiceTypes'][0]['serviceType'], self.solar.name)
         self.assertTrue(any(item['city'] == 'Lagos' for item in response.data['cityCompletionTrends']))
         self.assertTrue(any(item['province'] == 'Lagos' for item in response.data['provinceCompletionTrends']))
+
+    def test_admin_analytics_counts_only_available_technicians_in_overview(self):
+        User.objects.create_user(
+            username='offline_analytics_tech',
+            email='offline_analytics_tech@example.com',
+            password='Password123!',
+            role='technician',
+            status='active',
+            is_available=False,
+        )
+
+        response = self.client.get('/api/admin/analytics/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['overview']['activeTechnicians'], 1)
+        self.assertEqual(response.data['overview']['availableTechnicians'], 1)
+        self.assertEqual(response.data['overview']['activeTechnicianAccounts'], 2)
+
+    def test_admin_analytics_monthly_trend_buckets_completions_by_completion_month(self):
+        fixed_now = timezone.make_aware(datetime(2026, 4, 25, 12, 0, 0))
+
+        with patch('users.views.timezone.now', return_value=fixed_now):
+            base_response = self.client.get('/api/admin/analytics/')
+
+        base_trend = {
+            item['monthStart']: item
+            for item in base_response.data['monthlyServiceTrend']
+        }
+
+        request_time = timezone.make_aware(datetime(2026, 3, 28, 9, 0, 0))
+        completion_time = timezone.make_aware(datetime(2026, 4, 4, 15, 0, 0))
+
+        request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.cctv,
+            description='Cross-month completion request',
+            priority='Normal',
+            status='Completed',
+        )
+        ServiceRequest.objects.filter(pk=request_obj.pk).update(
+            request_date=request_time,
+            updated_at=completion_time,
+        )
+
+        ServiceLocation.objects.create(
+            request=request_obj,
+            address='Cross Month Address',
+            city='Lagos',
+            province='Lagos',
+            latitude=6.75,
+            longitude=3.45,
+        )
+
+        ServiceTicket.objects.create(
+            request=request_obj,
+            technician=self.technician_user,
+            scheduled_date=request_time.date(),
+            assigned_at=request_time + timezone.timedelta(hours=2),
+            start_time=completion_time - timezone.timedelta(hours=2),
+            status='Completed',
+            completed_date=completion_time,
+        )
+
+        with patch('users.views.timezone.now', return_value=fixed_now):
+            response = self.client.get('/api/admin/analytics/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        request_month = request_time.date().replace(day=1).isoformat()
+        completion_month = completion_time.date().replace(day=1).isoformat()
+        updated_trend = {
+            item['monthStart']: item
+            for item in response.data['monthlyServiceTrend']
+        }
+
+        self.assertEqual(
+            updated_trend[request_month]['requestCount'],
+            base_trend[request_month]['requestCount'] + 1,
+        )
+        self.assertEqual(
+            updated_trend[completion_month]['completedCount'],
+            base_trend[completion_month]['completedCount'] + 1,
+        )
+        self.assertEqual(
+            updated_trend[request_month]['completedCount'],
+            base_trend[request_month]['completedCount'],
+        )
 
 
 class CapabilityGrantApiTests(APITestCase):
@@ -911,3 +997,80 @@ class CapabilityGrantApiTests(APITestCase):
         self.assertIn(self.admin_user.username, usernames)
         self.assertIn(self.supervisor_user.username, usernames)
         self.assertIn(self.client_user.username, usernames)
+
+
+class AdminActivityLogTests(APITestCase):
+    def setUp(self):
+        self.superadmin_user = User.objects.create_user(
+            username='activity_owner',
+            password='Password123!',
+            role='superadmin',
+        )
+        self.client_user = User.objects.create_user(
+            username='activity_client',
+            password='Password123!',
+            role='client',
+        )
+        self.service_type = ServiceType.objects.create(
+            name='Activity Service',
+            description='Initial description',
+            estimated_duration=60,
+        )
+
+    def authenticate(self, user):
+        token = Token.objects.create(user=user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def results(self, response):
+        return response.data.get('results', response.data)
+
+    def test_token_actor_is_recorded_for_service_changes(self):
+        self.authenticate(self.superadmin_user)
+
+        response = self.client.put(
+            f'/api/admin/services/{self.service_type.id}/',
+            {
+                'name': 'Activity Service Updated',
+                'description': 'Updated description',
+                'estimated_duration': 90,
+                'estimated_cost': 250,
+                'max_daily_assignments': 3,
+                'procedures': [],
+                'required_equipment': [],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        log = ChangeLog.objects.filter(
+            content_type__model='servicetype',
+            object_id=self.service_type.id,
+            field_name='estimated_duration',
+        ).latest('changed_at')
+        self.assertEqual(log.changed_by, self.superadmin_user)
+        self.assertEqual(log.old_value, '60')
+        self.assertEqual(log.new_value, '90')
+
+    def test_admin_can_filter_activity_logs_by_model_and_action(self):
+        self.authenticate(self.superadmin_user)
+        self.service_type.estimated_duration = 75
+        self.service_type.save(update_fields=['estimated_duration'])
+
+        response = self.client.get('/api/admin/activity-logs/', {
+            'model': 'servicetype',
+            'action': 'update',
+            'search': 'estimated_duration',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        rows = self.results(response)
+        self.assertTrue(rows)
+        self.assertTrue(all(row['model'] == 'servicetype' for row in rows))
+        self.assertTrue(all(row['action'] == 'update' for row in rows))
+
+    def test_client_cannot_view_activity_logs(self):
+        self.authenticate(self.client_user)
+
+        response = self.client.get('/api/admin/activity-logs/')
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

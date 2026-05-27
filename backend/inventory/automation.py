@@ -11,7 +11,7 @@ from .models import (
 
 
 def _notify_roles(message, notification_type='info', roles=None):
-    target_roles = roles or ['admin', 'supervisor']
+    target_roles = roles or ['superadmin', 'admin']
     recipients = User.objects.filter(role__in=target_roles)
     for recipient in recipients:
         Notification.objects.create(
@@ -244,4 +244,82 @@ def issue_ticket_reservations(ticket, *, performed_by, reason=''):
             performed_by=performed_by,
             notes=reason or f'Issued during completion of ticket #{ticket.id}.',
         ))
+    return issued
+
+
+@transaction.atomic
+def issue_ticket_inventory_usage(ticket, *, usage, performed_by, reason=''):
+    reservations = {
+        reservation.id: reservation
+        for reservation in InventoryReservation.objects.filter(
+            service_ticket=ticket,
+            status='pending',
+        ).select_related('item', 'technician')
+    }
+    usage_rows = usage if isinstance(usage, list) else []
+    used_reservation_ids = set()
+    issued = 0
+
+    for row in usage_rows:
+        try:
+            reservation_id = int(row.get('reservation_id') or row.get('reservationId'))
+            used_quantity = int(row.get('quantity_used') if 'quantity_used' in row else row.get('quantityUsed'))
+        except (AttributeError, TypeError, ValueError):
+            raise ValueError('Inventory usage must include reservation_id and quantity_used.')
+
+        reservation = reservations.get(reservation_id)
+        if reservation is None:
+            raise ValueError('One or more inventory reservations were not found for this ticket.')
+        if used_quantity < 0:
+            raise ValueError('Used quantity cannot be negative.')
+        if used_quantity > reservation.quantity:
+            raise ValueError(f'Used quantity for {reservation.item.name} cannot exceed reserved quantity.')
+
+        used_reservation_ids.add(reservation_id)
+
+        if used_quantity == 0:
+            cancel_pending_reservation(
+                reservation,
+                performed_by=performed_by,
+                notes=f'No stock used from reservation #{reservation.id} for ticket #{ticket.id}.',
+            )
+            continue
+
+        if used_quantity == reservation.quantity:
+            issued += int(fulfill_pending_reservation(
+                reservation,
+                performed_by=performed_by,
+                notes=reason or f'Issued used stock for ticket #{ticket.id}.',
+            ))
+            continue
+
+        original_quantity = reservation.quantity
+        cancel_pending_reservation(
+            reservation,
+            performed_by=performed_by,
+            notes=f'Released reservation #{reservation.id} before recording partial usage.',
+        )
+        InventoryTransaction.objects.create(
+            item=reservation.item,
+            transaction_type='issue',
+            quantity=used_quantity,
+            technician=reservation.technician,
+            service_ticket=ticket,
+            notes=reason or f'Issued {used_quantity}/{original_quantity} reserved unit(s) for ticket #{ticket.id}.',
+            performed_by=performed_by,
+        )
+        reservation.quantity = used_quantity
+        reservation.status = 'fulfilled'
+        reservation.notes = f'{reservation.notes or ""}\nUsed {used_quantity}/{original_quantity} on completion.'.strip()
+        reservation.save(update_fields=['quantity', 'status', 'notes'])
+        issued += 1
+
+    for reservation_id, reservation in reservations.items():
+        if reservation_id not in used_reservation_ids:
+            issued += int(fulfill_pending_reservation(
+                reservation,
+                performed_by=performed_by,
+                notes=reason or f'Issued used stock for ticket #{ticket.id}.',
+            ))
+
     return issued

@@ -11,7 +11,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
-    
+
     def get_queryset(self):
         # Return only notifications for the current user
         return Notification.objects.filter(user=self.request.user).select_related(
@@ -20,18 +20,23 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         raise MethodNotAllowed('POST')
-    
+
     @action(detail=True, methods=['post'])
     def mark_read(self, request, pk=None):
-        """Mark a notification as read"""
-        notification = self.get_object()
+        """Mark a notification as read (idempotent if already read or missing)."""
+        notification = self.get_queryset().filter(pk=pk).first()
+        if not notification:
+            return Response(
+                {'status': 'noop', 'detail': 'Notification not found or no longer available.'},
+                status=status.HTTP_200_OK,
+            )
         notification.mark_as_read()
         return Response({
             'status': 'Notification marked as read',
             'notification_id': notification.id,
             'read_at': notification.read_at,
         })
-    
+
     @action(detail=False, methods=['post'])
     def mark_all_read(self, request):
         """Mark all notifications as read"""
@@ -45,7 +50,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
             'updated_count': updated_count,
             'read_at': read_at,
         })
-    
+
     @action(detail=False, methods=['get'])
     def unread_count(self, request):
         """Get count of unread notifications"""
@@ -57,24 +62,24 @@ class FirebaseTokenViewSet(viewsets.ModelViewSet):
     """ViewSet for managing Firebase Cloud Messaging tokens"""
     serializer_class = FirebaseTokenSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get_queryset(self):
         """Return only tokens for the current user"""
         return FirebaseToken.objects.filter(user=self.request.user)
-    
+
     @action(detail=False, methods=['post'])
     def register(self, request):
         """Register or update a Firebase token"""
         fcm_token = request.data.get('fcm_token')
         device_name = request.data.get('device_name', '')
         device_type = request.data.get('device_type', 'web')
-        
+
         if not fcm_token:
             return Response(
                 {'error': 'fcm_token is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Browser/device tokens are unique across users, so reuse the record if
         # the same device signs into a different account.
         token, created = FirebaseToken.objects.update_or_create(
@@ -86,24 +91,24 @@ class FirebaseTokenViewSet(viewsets.ModelViewSet):
                 'is_active': True
             }
         )
-        
+
         serializer = self.get_serializer(token)
         return Response(
             serializer.data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
         )
-    
+
     @action(detail=False, methods=['post'])
     def deregister(self, request):
         """Deregister a Firebase token"""
         fcm_token = request.data.get('fcm_token')
-        
+
         if not fcm_token:
             return Response(
                 {'error': 'fcm_token is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
             token = FirebaseToken.objects.get(user=request.user, fcm_token=fcm_token)
             token.is_active = False

@@ -42,6 +42,11 @@ IS_PRODUCTION = ENVIRONMENT == 'production'
 DEBUG = env_bool('DEBUG', default=ENVIRONMENT == 'development')
 IS_TEST = 'test' in sys.argv
 
+# Channels/ASGI: /static/ must be wired in urlpatterns (see urls.py). Django's helper only
+# attaches when DEBUG=True; if DEBUG is False locally/Docker, admin CSS/JS return HTML 404.
+# Never enable in production (use nginx or WhiteNoise + collectstatic instead).
+SERVE_STATIC_URLPATTERNS = (not IS_PRODUCTION) and env_bool('DJANGO_SERVE_STATIC', default=True)
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -106,7 +111,7 @@ LOGOUT_REDIRECT_URL = '/'
 INSTALLED_APPS = [
     # Daphne must be first (before staticfiles)
     'daphne',
-    
+
     # Django default apps
     'django.contrib.admin',
     'django.contrib.auth',
@@ -124,11 +129,10 @@ INSTALLED_APPS = [
     # Custom apps
     'users',
     'services',
-    # 'progress',  # Temporarily disabled
-    'messages_app',  # RE-ENABLED for ClientMessages
-    'notifications',  # Re-enabled
-    # 'history',  # Temporarily disabled
-    # 'forecast',  # Temporarily disabled
+    'progress',
+    'messages_app',
+    'notifications',
+    'history',
     'inventory',
 ]
 
@@ -139,6 +143,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'users.middleware.ChangeLogUserMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -233,7 +238,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = os.environ.get('TIME_ZONE', 'Asia/Kolkata')
+TIME_ZONE = os.environ.get('TIME_ZONE', 'Asia/Manila')
 
 USE_I18N = True
 
@@ -243,7 +248,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = 'static/'
+# Must be root-relative so {% static %} URLs work under nested paths (e.g. /admin/login/).
+STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']  # include custom static directory
 STATIC_ROOT = Path(os.environ.get('STATIC_ROOT', str(BASE_DIR / 'staticfiles')))
 
@@ -282,6 +288,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'login': '10/minute',
         'password_reset': '5/minute',
+        'geocode': '30/minute',
     },
 }
 

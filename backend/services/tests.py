@@ -16,6 +16,7 @@ from users.rbac import (
     AFTER_SALES_DASHBOARD_VIEW,
     SUPERVISOR_TICKETS_VIEW,
     SUPERVISOR_TRACKING_VIEW,
+    TECHNICIAN_DASHBOARD_VIEW,
     TECHNICIAN_PROFILE_VIEW,
 )
 from . import ors_utils
@@ -31,7 +32,7 @@ from services.models import (
     TechnicianSkill,
     TicketCrewAssignment,
 )
-from services.sla import evaluate_service_request_sla, evaluate_service_ticket_sla
+from services.sla import evaluate_service_request_sla, evaluate_service_ticket_sla, get_ticket_dispatch_state
 
 
 class RoutingFallbackTests(TestCase):
@@ -54,6 +55,23 @@ class RoutingFallbackTests(TestCase):
         self.assertGreater(segment['distance'], 0)
         self.assertGreater(segment['duration'], 0)
 
+    def test_ors_route_endpoint_uses_synthetic_fallback_when_external_routing_disabled(self):
+        user = User.objects.create_user(username='admin-route', password='pass', role='admin')
+        api_client = APIClient()
+        api_client.force_authenticate(user=user)
+
+        with self.settings(DISABLE_EXTERNAL_ROUTING=True):
+            response = api_client.get('/api/services/ors/route/', {
+                'start': '121.60054,13.928376',
+                'end': '121.592183,14.022091',
+            })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['type'], 'FeatureCollection')
+        feature = response.data['features'][0]
+        self.assertEqual(feature['properties']['routing_source'], 'synthetic')
+        self.assertTrue(feature['properties']['is_fallback'])
+
 
 class DashboardRoleTests(TestCase):
     def setUp(self):
@@ -70,15 +88,15 @@ class DashboardRoleTests(TestCase):
             password='pass',
             role='admin'
         )
-        self.supervisor_user = User.objects.create_user(
-            username='sup1',
+        self.operations_admin = User.objects.create_user(
+            username='operations-admin1',
             password='pass',
-            role='supervisor'
+            role='admin'
         )
-        self.follow_up_user = User.objects.create_user(
-            username='followup1',
+        self.after_sales_admin = User.objects.create_user(
+            username='after-sales-admin1',
             password='pass',
-            role='follow_up'
+            role='admin'
         )
         self.technician_user = User.objects.create_user(
             username='tech1',
@@ -112,7 +130,7 @@ class DashboardRoleTests(TestCase):
         self.ticket = ServiceTicket.objects.create(
             request=self.request_obj,
             technician=self.technician_user,
-            supervisor=self.supervisor_user,
+            supervisor=self.operations_admin,
             scheduled_date=timezone.now().date(),
             status='Not Started',
             priority='Normal',
@@ -146,13 +164,124 @@ class DashboardRoleTests(TestCase):
         self.assertEqual(response.data['client_schedule'][0]['client'], 'Mia Dela Cruz')
         self.assertEqual(response.data['client_schedule'][0]['assigned_technician'], 'Marco Reyes')
 
-    def test_supervisor_dashboard(self):
-        self.api_client.force_authenticate(user=self.supervisor_user)
-        response = self.api_client.get('/api/services/dashboard/')
+    def test_client_can_submit_multiple_services_in_one_request(self):
+        second_service = ServiceType.objects.create(
+            name='Battery Inspection',
+            description='Battery inspection',
+            estimated_duration=45,
+        )
+
+        self.api_client.force_authenticate(user=self.client_user)
+        response = self.api_client.post('/api/services/service-requests/', {
+            'service_type': self.service_type.id,
+            'service_types': [self.service_type.id, second_service.id],
+            'description': 'Please handle both services together.',
+            'priority': 'Normal',
+            'preferred_date': (timezone.localdate() + timedelta(days=1)).isoformat(),
+            'location_address': '123 Test St',
+            'location_city': 'Testville',
+            'location_province': 'Test',
+            'latitude': '10.000000',
+            'longitude': '20.000000',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['service_summary'], 'Test Service, Battery Inspection')
+        self.assertEqual(len(response.data['service_items']), 2)
+        request_obj = ServiceRequest.objects.get(pk=response.data['id'])
+        self.assertEqual(request_obj.service_items.count(), 2)
+
+    def test_admin_calendar_uses_ticket_and_request_database_rows(self):
+        self.api_client.force_authenticate(user=self.admin_user)
+        response = self.api_client.get('/api/admin/calendar/', {
+            'start': self.ticket.scheduled_date.isoformat(),
+            'end': self.ticket.scheduled_date.isoformat(),
+        })
+
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['role'], 'supervisor')
+        self.assertEqual(len(response.data['events']), 1)
+        event = response.data['events'][0]
+        self.assertEqual(event['entity_type'], 'ticket')
+        self.assertEqual(event['ticket_id'], self.ticket.id)
+        self.assertEqual(event['request_id'], self.request_obj.id)
+        self.assertEqual(event['client'], 'client1')
+        self.assertEqual(event['service_type'], 'Test Service')
+        self.assertEqual(event['calendar_status'], 'pending_approval')
+        self.assertEqual(event['assignment_status'], 'assigned')
+        self.assertEqual(event['assigned_technician'], 'tech1')
+
+    def test_admin_calendar_marks_past_unassigned_ticket_as_missed_dispatch(self):
+        request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Past unassigned request',
+            priority='Normal',
+            status='Approved',
+        )
+        scheduled_date = timezone.localdate() - timedelta(days=1)
+        ticket = ServiceTicket.objects.create(
+            request=request_obj,
+            technician=None,
+            scheduled_date=scheduled_date,
+            status='Not Started',
+            priority='Normal',
+        )
+
+        self.api_client.force_authenticate(user=self.admin_user)
+        response = self.api_client.get('/api/admin/calendar/', {
+            'start': scheduled_date.isoformat(),
+            'end': scheduled_date.isoformat(),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        event = next(item for item in response.data['events'] if item['ticket_id'] == ticket.id)
+        self.assertEqual(event['calendar_status'], 'missed_dispatch')
+        self.assertEqual(event['dispatch_status'], 'missed_dispatch')
+        self.assertTrue(event['is_missed_dispatch'])
+
+    def test_admin_calendar_does_not_show_request_fallback_when_ticket_exists_outside_range(self):
+        preferred_date = timezone.localdate() + timedelta(days=3)
+        scheduled_date = preferred_date + timedelta(days=35)
+        request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Rescheduled request',
+            priority='Normal',
+            status='Approved',
+            preferred_date=preferred_date,
+        )
+        ServiceTicket.objects.create(
+            request=request_obj,
+            technician=self.technician_user,
+            supervisor=self.operations_admin,
+            scheduled_date=scheduled_date,
+            status='Not Started',
+            priority='Normal',
+        )
+
+        self.api_client.force_authenticate(user=self.admin_user)
+        response = self.api_client.get('/api/admin/calendar/', {
+            'start': preferred_date.isoformat(),
+            'end': preferred_date.isoformat(),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(any(event['request_id'] == request_obj.id for event in response.data['events']))
+
+    def test_non_admin_cannot_access_admin_calendar(self):
+        self.api_client.force_authenticate(user=self.technician_user)
+        response = self.api_client.get('/api/admin/calendar/')
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_operations_dashboard_alias_uses_admin_workspace(self):
+        self.api_client.force_authenticate(user=self.operations_admin)
+        response = self.api_client.get('/api/services/dashboard/', {'role': 'supervisor'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['role'], 'admin')
+        self.assertIn('operations', response.data)
         self.assertEqual(response.data['overview']['team_tickets'], 1)
-        self.assertEqual(len(response.data['technician_performance']), 1)
+        self.assertEqual(len(response.data['operations']['technician_performance']), 1)
 
     def test_technician_dashboard(self):
         self.api_client.force_authenticate(user=self.technician_user)
@@ -164,13 +293,13 @@ class DashboardRoleTests(TestCase):
         self.assertEqual(len(response.data['active_work']), 1)
         self.assertEqual(response.data['active_work'][0]['id'], self.ticket.id)
 
-    def test_supervisor_dashboard_tickets_listed(self):
-        self.api_client.force_authenticate(user=self.supervisor_user)
-        response = self.api_client.get('/api/services/dashboard/')
+    def test_operations_dashboard_alias_lists_tickets(self):
+        self.api_client.force_authenticate(user=self.operations_admin)
+        response = self.api_client.get('/api/services/dashboard/', {'role': 'operations'})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['role'], 'supervisor')
+        self.assertEqual(response.data['role'], 'admin')
         self.assertEqual(response.data['overview']['team_tickets'], 1)
-        self.assertTrue(any(t['id'] == self.ticket.id for t in response.data['recent_tickets']))
+        self.assertTrue(any(t['id'] == self.ticket.id for t in response.data['operations']['recent_tickets']))
 
     def test_invalid_role_returns_bad_request(self):
         unknown_user = User.objects.create_user(
@@ -235,7 +364,7 @@ class DashboardRoleTests(TestCase):
         case = FollowUpCase.objects.create(
             service_ticket=self.ticket,
             client=self.client_user,
-            assigned_to=self.follow_up_user,
+            assigned_to=self.after_sales_admin,
             created_by=self.admin_user,
             case_type='follow_up',
             status='open',
@@ -243,20 +372,14 @@ class DashboardRoleTests(TestCase):
             summary='Customer requested a callback'
         )
 
-        self.api_client.force_authenticate(user=self.follow_up_user)
-        response = self.api_client.get('/api/services/dashboard/')
+        self.api_client.force_authenticate(user=self.after_sales_admin)
+        response = self.api_client.get('/api/services/dashboard/', {'role': 'follow_up'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['role'], 'follow_up')
+        self.assertEqual(response.data['role'], 'admin')
         self.assertEqual(response.data['overview']['total_cases'], 1)
-        self.assertEqual(response.data['recent_cases'][0]['id'], case.id)
-        self.assertEqual(response.data['recent_cases'][0]['client_email'], 'client1@example.com')
-        self.assertEqual(response.data['recent_cases'][0]['client_phone'], '+15550000001')
-        self.assertEqual(response.data['recent_cases'][0]['service_address'], '123 Test St')
-        self.assertEqual(response.data['overview']['follow_up_candidates'], 1)
-        self.assertEqual(response.data['follow_up_candidates'][0]['ticket_id'], candidate_ticket.id)
-        self.assertEqual(response.data['follow_up_candidates'][0]['client_phone'], '+15550000001')
-        self.assertEqual(response.data['follow_up_candidates'][0]['service_address'], '456 Callback Ave')
+        self.assertEqual(response.data['after_sales']['recent_cases'][0]['id'], case.id)
+        self.assertEqual(response.data['after_sales']['recent_cases'][0]['client'], 'client1')
 
 
 class ServiceRequestTicketLifecycleTests(APITestCase):
@@ -396,6 +519,80 @@ class ServiceRequestTicketLifecycleTests(APITestCase):
         self.assertEqual(request_obj.location.latitude, Decimal('14.599500'))
         self.assertEqual(request_obj.location.longitude, Decimal('120.984200'))
 
+    def test_admin_walk_in_request_creates_real_ticket_after_approval(self):
+        second_service = ServiceType.objects.create(
+            name='Solar Panel Cleaning',
+            description='Panel cleaning service',
+            estimated_duration=60,
+        )
+        preferred_date = timezone.localdate() + timedelta(days=1)
+
+        self.client.force_authenticate(user=self.admin_user)
+        create_response = self.client.post(
+            '/api/services/service-requests/',
+            {
+                'client': self.other_client_user.id,
+                'service_type': self.service_type.id,
+                'service_types': [self.service_type.id, second_service.id],
+                'description': 'Walk-in client requested installation and cleaning.',
+                'priority': 'High',
+                'request_source': 'walk_in',
+                'preferred_date': preferred_date.isoformat(),
+                'preferred_time_slot': 'morning',
+                'scheduling_notes': 'Client is waiting for dispatch confirmation.',
+                'location_address': '12 Walk-in Counter Street',
+                'location_city': 'Naval',
+                'location_province': 'Biliran',
+                'latitude': '11.560000',
+                'longitude': '124.395000',
+            },
+            format='json',
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        request_obj = ServiceRequest.objects.get(id=create_response.data['id'])
+        self.assertEqual(request_obj.client, self.other_client_user)
+        self.assertEqual(request_obj.status, 'Pending')
+        self.assertEqual(request_obj.request_source, 'walk_in')
+        self.assertEqual(create_response.data['request_source_label'], 'Walk-in')
+        self.assertEqual(request_obj.service_items.count(), 2)
+        self.assertEqual(request_obj.location.address, '12 Walk-in Counter Street')
+        self.assertEqual(request_obj.location.latitude, Decimal('11.560000'))
+        self.assertFalse(ServiceTicket.objects.filter(request=request_obj).exists())
+
+        approve_response = self.client.post(
+            f'/api/services/service-requests/{request_obj.id}/approve/',
+            {},
+            format='json',
+        )
+
+        self.assertEqual(approve_response.status_code, status.HTTP_200_OK)
+        request_obj.refresh_from_db()
+        ticket = ServiceTicket.objects.get(request=request_obj)
+        self.assertEqual(request_obj.status, 'Approved')
+        self.assertTrue(request_obj.auto_ticket_created)
+        self.assertEqual(ticket.supervisor, self.admin_user)
+        self.assertEqual(ticket.scheduled_date, preferred_date)
+        self.assertEqual(ticket.scheduled_time_slot, 'morning')
+        self.assertEqual(ticket.notes, 'Client is waiting for dispatch confirmation.')
+
+        tickets_response = self.client.get('/api/services/service-tickets/')
+        self.assertEqual(tickets_response.status_code, status.HTTP_200_OK)
+        serialized_ticket = next(
+            item for item in tickets_response.data['results']
+            if item['id'] == ticket.id
+        )
+        self.assertEqual(
+            serialized_ticket['request_details']['service_summary'],
+            'Installation, Solar Panel Cleaning',
+        )
+        self.assertEqual(serialized_ticket['request_details']['request_source'], 'walk_in')
+        self.assertEqual(serialized_ticket['request_details']['request_source_label'], 'Walk-in')
+        self.assertEqual(
+            serialized_ticket['request_details']['client_fullname'],
+            self.other_client_user.username,
+        )
+
     def test_completed_ticket_becomes_heatmap_ready(self):
         self.client.force_authenticate(user=self.client_user)
 
@@ -436,10 +633,19 @@ class ServiceRequestTicketLifecycleTests(APITestCase):
             format='json',
         )
         self.assertEqual(start_response.status_code, status.HTTP_200_OK)
+        InspectionChecklist.objects.create(
+            ticket=ticket,
+            is_completed=True,
+            completed_at=timezone.now(),
+            completed_by=self.technician_user,
+        )
 
         complete_response = self.client.post(
             f'/api/services/service-tickets/{ticket.id}/complete_work/',
-            {},
+            {
+                'completion_proof_images': ['https://example.com/proof/job-complete.jpg'],
+                'completion_notes': 'All work completed successfully.',
+            },
             format='json',
         )
 
@@ -449,6 +655,8 @@ class ServiceRequestTicketLifecycleTests(APITestCase):
         self.assertEqual(ticket.status, 'Completed')
         self.assertIsNotNone(ticket.completed_date)
         self.assertEqual(request_obj.status, 'Completed')
+        self.assertEqual(ticket.completion_proof_images, ['https://example.com/proof/job-complete.jpg'])
+        self.assertEqual(ticket.completion_notes, 'All work completed successfully.')
 
         self.client.force_authenticate(user=self.admin_user)
         heatmap_response = self.client.get('/api/services/coverage-heatmap/service_density/')
@@ -562,6 +770,76 @@ class FollowUpCaseApiTests(APITestCase):
         self.assertIn('service_ticket', response.data)
         self.assertEqual(FollowUpCase.objects.count(), 0)
 
+    def test_follow_up_case_filters_run_in_database(self):
+        self.client.force_authenticate(user=self.follow_up_user)
+        today = timezone.localdate()
+        overdue_case = FollowUpCase.objects.create(
+            service_ticket=self.completed_ticket,
+            client=self.client_user,
+            assigned_to=self.follow_up_user,
+            created_by=self.follow_up_user,
+            case_type='complaint',
+            status='open',
+            priority='urgent',
+            creation_source='manual',
+            summary='Overdue customer recovery',
+            due_date=today - timedelta(days=1),
+        )
+        FollowUpCase.objects.create(
+            service_ticket=self.completed_ticket,
+            client=self.client_user,
+            assigned_to=self.follow_up_user,
+            created_by=self.follow_up_user,
+            case_type='feedback',
+            status='resolved',
+            priority='low',
+            creation_source='completion_flow',
+            summary='Resolved completion feedback',
+            due_date=today + timedelta(days=3),
+        )
+
+        response = self.client.get(
+            '/api/services/follow-up-cases/',
+            {'status': 'overdue', 'case_type': 'complaint', 'priority': 'urgent'},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        rows = response.data.get('results', response.data)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['id'], overdue_case.id)
+
+    def test_follow_up_case_search_uses_api_query(self):
+        self.client.force_authenticate(user=self.follow_up_user)
+        matching_case = FollowUpCase.objects.create(
+            service_ticket=self.completed_ticket,
+            client=self.client_user,
+            assigned_to=self.follow_up_user,
+            created_by=self.follow_up_user,
+            case_type='warranty',
+            status='in_progress',
+            priority='high',
+            creation_source='completion_flow',
+            summary='Solar inverter warranty callback',
+        )
+        FollowUpCase.objects.create(
+            service_ticket=self.completed_ticket,
+            client=self.client_user,
+            assigned_to=self.follow_up_user,
+            created_by=self.follow_up_user,
+            case_type='feedback',
+            status='open',
+            priority='normal',
+            creation_source='manual',
+            summary='General service feedback',
+        )
+
+        response = self.client.get('/api/services/follow-up-cases/', {'search': 'inverter'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        rows = response.data.get('results', response.data)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['id'], matching_case.id)
+
     def test_approving_auto_created_request_does_not_create_duplicate_ticket(self):
         request_obj = ServiceRequest.objects.create(
             client=self.client_user,
@@ -608,7 +886,7 @@ class CapabilityBasedAfterSalesAccessTests(APITestCase):
         self.capability_user = User.objects.create_user(
             username='capability_user',
             password='pass',
-            role='follow_up',
+            role='admin',
         )
         self.client_user = User.objects.create_user(
             username='capability_client',
@@ -663,7 +941,8 @@ class CapabilityBasedAfterSalesAccessTests(APITestCase):
         response = self.client.get('/api/dashboard/stats/', {'role': 'follow_up'})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['role'], 'follow_up')
+        self.assertEqual(response.data['role'], 'admin')
+        self.assertIn('after_sales', response.data)
 
     def test_capability_granted_user_can_manage_follow_up_cases(self):
         self.client.force_authenticate(user=self.capability_user)
@@ -701,10 +980,10 @@ class StaffWorkspaceCapabilityAccessTests(APITestCase):
             password='pass',
             role='admin',
         )
-        self.supervisor_user = User.objects.create_user(
-            username='staff_cap_supervisor',
+        self.operations_admin = User.objects.create_user(
+            username='staff_cap_operations_admin',
             password='pass',
-            role='supervisor',
+            role='admin',
         )
         self.technician_user = User.objects.create_user(
             username='staff_cap_technician',
@@ -741,25 +1020,26 @@ class StaffWorkspaceCapabilityAccessTests(APITestCase):
         )
         self.ticket = ServiceTicket.objects.create(
             request=self.request_obj,
-            supervisor=self.supervisor_user,
+            supervisor=self.operations_admin,
             technician=self.technician_user,
             scheduled_date=timezone.now().date(),
             status='Not Started',
             priority='Normal',
         )
 
-    def test_supervisor_with_tracking_only_capability_cannot_open_supervisor_dashboard(self):
+    def test_operations_admin_can_open_legacy_supervisor_dashboard_alias(self):
         UserCapabilityGrant.objects.create(
-            user=self.supervisor_user,
+            user=self.operations_admin,
             capability_code=SUPERVISOR_TRACKING_VIEW,
             granted_by=self.admin_user,
         )
-        self.client.force_authenticate(user=self.supervisor_user)
+        self.client.force_authenticate(user=self.operations_admin)
 
         dashboard_response = self.client.get('/api/dashboard/stats/', {'role': 'supervisor'})
         tracking_response = self.client.get('/api/tracking/')
 
-        self.assertEqual(dashboard_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(dashboard_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(dashboard_response.data['role'], 'admin')
         self.assertEqual(tracking_response.status_code, status.HTTP_200_OK)
 
     def test_superadmin_can_open_admin_tracking(self):
@@ -774,35 +1054,35 @@ class StaffWorkspaceCapabilityAccessTests(APITestCase):
 
         self.assertEqual(tracking_response.status_code, status.HTTP_200_OK)
 
-    def test_supervisor_without_tracking_capability_cannot_access_technician_location_feeds(self):
-        limited_supervisor = User.objects.create_user(
-            username='staff_cap_limited_supervisor',
+    def test_non_admin_without_tracking_access_cannot_access_technician_location_feeds(self):
+        limited_user = User.objects.create_user(
+            username='staff_cap_limited_user',
             password='pass',
-            role='supervisor',
+            role='technician',
         )
         UserCapabilityGrant.objects.create(
-            user=limited_supervisor,
+            user=limited_user,
             capability_code=SUPERVISOR_TICKETS_VIEW,
             granted_by=self.admin_user,
         )
-        self.client.force_authenticate(user=limited_supervisor)
+        self.client.force_authenticate(user=limited_user)
 
         history_response = self.client.get('/api/services/technician-locations/')
         all_locations_response = self.client.get('/api/services/technician-locations/all_technicians_locations/')
 
-        self.assertEqual(history_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(history_response.status_code, status.HTTP_200_OK)
         self.assertEqual(all_locations_response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_supervisor_with_tracking_capability_can_access_technician_location_feeds(self):
+    def test_operations_admin_can_access_technician_location_feeds(self):
         self.technician_user.current_latitude = 14.5764
         self.technician_user.current_longitude = 121.0851
         self.technician_user.save(update_fields=['current_latitude', 'current_longitude'])
         UserCapabilityGrant.objects.create(
-            user=self.supervisor_user,
+            user=self.operations_admin,
             capability_code=SUPERVISOR_TRACKING_VIEW,
             granted_by=self.admin_user,
         )
-        self.client.force_authenticate(user=self.supervisor_user)
+        self.client.force_authenticate(user=self.operations_admin)
 
         history_response = self.client.get('/api/services/technician-locations/')
         all_locations_response = self.client.get('/api/services/technician-locations/all_technicians_locations/')
@@ -827,6 +1107,21 @@ class StaffWorkspaceCapabilityAccessTests(APITestCase):
         self.assertEqual(dashboard_response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(jobs_response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(profile_response.status_code, status.HTTP_200_OK)
+
+    def test_technician_dashboard_endpoint_returns_200_for_granted_technician(self):
+        UserCapabilityGrant.objects.create(
+            user=self.technician_user,
+            capability_code=TECHNICIAN_DASHBOARD_VIEW,
+            granted_by=self.admin_user,
+        )
+        self.client.force_authenticate(user=self.technician_user)
+
+        response = self.client.get('/api/technician/dashboard/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['technician']['id'], self.technician_user.id)
+        self.assertIn('full_name', response.data['technician'])
+        self.assertIn('current_location', response.data['technician'])
 
 
 class OperationalDataAccessTests(APITestCase):
@@ -868,6 +1163,81 @@ class OperationalDataAccessTests(APITestCase):
         ):
             response = self.client.get(endpoint)
             self.assertEqual(response.status_code, status.HTTP_200_OK, endpoint)
+
+
+class ServiceStatusHistoryAccessTests(APITestCase):
+    def setUp(self):
+        self.admin_user = User.objects.create_user(username='history_admin', password='pass', role='admin')
+        self.client_user = User.objects.create_user(username='history_client', password='pass', role='client')
+        self.other_client = User.objects.create_user(username='history_other_client', password='pass', role='client')
+        self.technician_user = User.objects.create_user(username='history_tech', password='pass', role='technician')
+        self.service_type = ServiceType.objects.create(
+            name='History Service',
+            description='Timeline history service',
+            estimated_duration=60,
+        )
+        self.request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Visible request',
+            priority='Normal',
+            status='Approved',
+        )
+        self.other_request = ServiceRequest.objects.create(
+            client=self.other_client,
+            service_type=self.service_type,
+            description='Hidden request',
+            priority='Normal',
+            status='Approved',
+        )
+        self.ticket = ServiceTicket.objects.create(
+            request=self.request_obj,
+            technician=self.technician_user,
+            scheduled_date=timezone.localdate(),
+            status='Not Started',
+            priority='Normal',
+        )
+        self.other_ticket = ServiceTicket.objects.create(
+            request=self.other_request,
+            technician=None,
+            scheduled_date=timezone.localdate(),
+            status='Not Started',
+            priority='Normal',
+        )
+        self.visible_event = ServiceStatusHistory.objects.create(
+            ticket=self.ticket,
+            status='Assigned',
+            changed_by=self.admin_user,
+            notes='Technician assigned.',
+        )
+        self.hidden_event = ServiceStatusHistory.objects.create(
+            ticket=self.other_ticket,
+            status='Not Started',
+            changed_by=self.admin_user,
+            notes='Other client event.',
+        )
+
+    def history_results(self, response):
+        return response.data.get('results', response.data)
+
+    def test_status_history_can_be_filtered_to_one_ticket(self):
+        self.client.force_authenticate(user=self.admin_user)
+
+        response = self.client.get('/api/services/status-history/', {'ticket': self.ticket.id})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([event['id'] for event in self.history_results(response)], [self.visible_event.id])
+
+    def test_client_status_history_filter_does_not_leak_other_tickets(self):
+        self.client.force_authenticate(user=self.client_user)
+
+        own_response = self.client.get('/api/services/status-history/', {'ticket': self.ticket.id})
+        other_response = self.client.get('/api/services/status-history/', {'ticket': self.other_ticket.id})
+
+        self.assertEqual(own_response.status_code, status.HTTP_200_OK)
+        self.assertEqual([event['id'] for event in self.history_results(own_response)], [self.visible_event.id])
+        self.assertEqual(other_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.history_results(other_response), [])
 
 
 class CoverageHeatmapTests(APITestCase):
@@ -929,6 +1299,111 @@ class CoverageHeatmapTests(APITestCase):
         self.assertEqual(response.data['total_points'], 1)
         self.assertEqual(response.data['max_density'], 2)
         self.assertEqual(response.data['heatmap_data'][0]['count'], 2)
+
+    def test_service_density_excludes_unfinished_requests(self):
+        active_request = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Approved request',
+            priority='Normal',
+            status='Approved',
+        )
+        completed_request = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Completed request',
+            priority='Normal',
+            status='Completed',
+        )
+
+        ServiceLocation.objects.create(
+            request=active_request,
+            address='16 Heatmap Street',
+            city='Manila',
+            province='Metro Manila',
+            latitude=14.6010,
+            longitude=120.9860,
+        )
+        ServiceLocation.objects.create(
+            request=completed_request,
+            address='16 Heatmap Street',
+            city='Manila',
+            province='Metro Manila',
+            latitude=14.6010,
+            longitude=120.9860,
+        )
+
+        response = self.client.get('/api/services/coverage-heatmap/service_density/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['total_points'], 1)
+        point = response.data['heatmap_data'][0]
+        self.assertEqual(point['count'], 1)
+        self.assertEqual(point['status_breakdown'][0]['name'], 'Completed')
+
+    def test_service_density_supports_client_and_technician_filters(self):
+        technician = User.objects.create_user(
+            username='heatmap_technician',
+            password='pass',
+            role='technician',
+            status='active',
+            current_latitude=14.5995,
+            current_longitude=120.9842,
+        )
+        other_client = User.objects.create_user(
+            username='other_heatmap_client',
+            password='pass',
+            role='client',
+        )
+        matching_request = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Matching completed request',
+            priority='Normal',
+            status='Completed',
+        )
+        other_request = ServiceRequest.objects.create(
+            client=other_client,
+            service_type=self.service_type,
+            description='Other completed request',
+            priority='Normal',
+            status='Completed',
+        )
+        ServiceLocation.objects.create(
+            request=matching_request,
+            address='14 Heatmap Street',
+            city='Manila',
+            province='Metro Manila',
+            latitude=14.5995,
+            longitude=120.9842,
+        )
+        ServiceLocation.objects.create(
+            request=other_request,
+            address='15 Heatmap Street',
+            city='Manila',
+            province='Metro Manila',
+            latitude=14.6000,
+            longitude=120.9850,
+        )
+        ServiceTicket.objects.create(
+            request=matching_request,
+            technician=technician,
+            scheduled_date=timezone.localdate(),
+            status='Completed',
+            completed_date=timezone.now(),
+        )
+
+        response = self.client.get(
+            '/api/services/coverage-heatmap/service_density/',
+            {'client': self.client_user.id, 'technician': technician.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['total_points'], 1)
+        point = response.data['heatmap_data'][0]
+        self.assertEqual(point['count'], 1)
+        self.assertEqual(point['clients'][0]['id'], self.client_user.id)
+        self.assertEqual(point['technicians'][0]['id'], technician.id)
 
 
 class MaintenanceWorkflowTests(APITestCase):
@@ -1031,6 +1506,62 @@ class MaintenanceWorkflowTests(APITestCase):
         self.assertEqual(schedule.notify_on_date, schedule.next_due_date - timedelta(days=14))
         self.assertEqual(schedule.status, 'scheduled')
 
+    def test_checklist_submission_stores_procedure_inputs(self):
+        self.client.force_authenticate(user=self.technician_user)
+
+        response = self.client.post(
+            '/api/checklist/',
+            {
+                'jobId': self.ticket.id,
+                'serviceType': 'Test Service',
+                'procedure_source': 'dynamic',
+                'completed': {'0': True, '1': True},
+                'checklist_items': [
+                    {'index': 0, 'label': 'Inspect site', 'completed': True},
+                    {'index': 1, 'label': 'Test output', 'completed': True},
+                ],
+                'required_equipment_snapshot': ['Multimeter', {'name': 'Ladder', 'quantity': 1}],
+                'notes': 'Procedure inputs saved.',
+                'maintenance_required': False,
+                'warranty_provided': False,
+                'follow_up_required': False,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        checklist = InspectionChecklist.objects.get(ticket=self.ticket)
+        self.assertEqual(checklist.ticket, self.ticket)
+        self.assertEqual(checklist.submitted_by, self.technician_user)
+        self.assertIsNotNone(checklist.submitted_at)
+        self.assertEqual(checklist.completed_by, self.technician_user)
+        self.assertEqual(checklist.service_type_label, 'Test Service')
+        self.assertEqual(checklist.procedure_source, 'dynamic')
+        self.assertEqual(checklist.checklist_items[0]['label'], 'Inspect site')
+        self.assertTrue(checklist.checklist_items[1]['completed'])
+        self.assertEqual(checklist.required_equipment_snapshot[0], 'Multimeter')
+
+    def test_checklist_rejects_conflicting_after_sales_decision(self):
+        self.client.force_authenticate(user=self.technician_user)
+
+        response = self.client.post(
+            '/api/checklist/',
+            {
+                'jobId': self.ticket.id,
+                'completed': {'0': True, '1': True},
+                'notes': 'After-sales decision mismatch.',
+                'maintenance_required': False,
+                'after_sales_decision': 'none',
+                'warranty_provided': True,
+                'warranty_period_days': 30,
+                'follow_up_required': False,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('after_sales_decision', response.data)
+
     def test_due_soon_alerts_create_maintenance_case_notifications_and_dashboard_queue(self):
         InspectionChecklist.objects.create(
             ticket=self.ticket,
@@ -1105,12 +1636,12 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
         self.supervisor_user = User.objects.create_user(
             username='structured-supervisor',
             password='pass',
-            role='supervisor',
+            role='admin',
         )
         self.follow_up_user = User.objects.create_user(
             username='structured-follow-up',
             password='pass',
-            role='follow_up',
+            role='admin',
         )
         self.technician_user = User.objects.create_user(
             username='structured-tech',
@@ -1267,6 +1798,10 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
         self.assertTrue(any(item['type'] == 'video' for item in checklist.proof_media))
         self.assertTrue(checklist.warranty_provided)
         self.assertEqual(checklist.warranty_period_days, 60)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.warranty_status, 'not_applicable')
+        self.assertIsNone(ticket.warranty_start_date)
+        self.assertIsNone(ticket.warranty_end_date)
 
         start_response = self.client.post(
             f'/api/technician/jobs/{ticket.id}/status/',
@@ -1285,6 +1820,160 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
         self.assertEqual(ticket.warranty_status, 'active')
         self.assertEqual(ticket.warranty_period_days, 60)
         self.assertEqual(ticket.warranty_end_date, ticket.completed_date.date() + timedelta(days=60))
+        warranty_case = FollowUpCase.objects.get(
+            service_ticket=ticket,
+            case_type='warranty',
+            creation_source='completion_flow',
+        )
+        self.assertEqual(warranty_case.client, self.client_user)
+        self.assertEqual(warranty_case.created_by, self.technician_user)
+        self.assertEqual(warranty_case.due_date, ticket.warranty_end_date)
+
+    def test_assignment_rejects_technician_over_daily_duration_limit(self):
+        scheduled_date = timezone.localdate() + timedelta(days=1)
+        for index in range(4):
+            request_obj = ServiceRequest.objects.create(
+                client=self.client_user,
+                service_type=self.service_type,
+                description=f'Existing scheduled job {index + 1}',
+                priority='Normal',
+                status='Approved',
+            )
+            ServiceTicket.objects.create(
+                request=request_obj,
+                technician=self.technician_user,
+                scheduled_date=scheduled_date,
+                status='Not Started',
+                priority='Normal',
+            )
+
+        request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Overflow scheduled job',
+            priority='Normal',
+            status='Approved',
+        )
+        ticket = ServiceTicket.objects.create(
+            request=request_obj,
+            scheduled_date=scheduled_date,
+            status='Not Started',
+            priority='Normal',
+        )
+
+        self.client.force_authenticate(user=self.supervisor_user)
+        response = self.client.post(
+            f'/api/services/service-tickets/{ticket.id}/assign/',
+            {'technician_id': self.technician_user.id},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('daily limit', response.data['error'])
+        ticket.refresh_from_db()
+        self.assertIsNone(ticket.technician)
+
+    def test_smart_assignment_skips_technician_over_daily_duration_limit(self):
+        scheduled_date = timezone.localdate() + timedelta(days=1)
+        for index in range(4):
+            request_obj = ServiceRequest.objects.create(
+                client=self.client_user,
+                service_type=self.service_type,
+                description=f'Existing smart dispatch job {index + 1}',
+                priority='Normal',
+                status='Approved',
+            )
+            ServiceTicket.objects.create(
+                request=request_obj,
+                technician=self.technician_user,
+                scheduled_date=scheduled_date,
+                status='Not Started',
+                priority='Normal',
+            )
+
+        request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Smart dispatch should use backup technician',
+            priority='Normal',
+            status='Approved',
+        )
+        ServiceLocation.objects.create(
+            request=request_obj,
+            address='260 Capacity Street',
+            city='Makati',
+            province='Metro Manila',
+            latitude='14.565000',
+            longitude='121.025000',
+        )
+        ticket = ServiceTicket.objects.create(
+            request=request_obj,
+            scheduled_date=scheduled_date,
+            status='Not Started',
+            priority='Normal',
+        )
+
+        self.client.force_authenticate(user=self.supervisor_user)
+        response = self.client.post(
+            f'/api/services/service-tickets/{ticket.id}/auto_assign/',
+            {},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.technician, self.backup_technician)
+
+    def test_smart_assignment_prefers_less_loaded_technician_after_completed_work(self):
+        scheduled_date = timezone.localdate() + timedelta(days=1)
+        completed_request = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Completed earlier job',
+            priority='Normal',
+            status='Completed',
+        )
+        ServiceTicket.objects.create(
+            request=completed_request,
+            technician=self.technician_user,
+            scheduled_date=scheduled_date,
+            status='Completed',
+            priority='Normal',
+            completed_date=timezone.now(),
+        )
+
+        request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Next job should go to less loaded technician',
+            priority='Normal',
+            status='Approved',
+        )
+        ServiceLocation.objects.create(
+            request=request_obj,
+            address='270 Fair Dispatch Street',
+            city='Makati',
+            province='Metro Manila',
+            latitude='14.565000',
+            longitude='121.025000',
+        )
+        ticket = ServiceTicket.objects.create(
+            request=request_obj,
+            scheduled_date=scheduled_date,
+            status='Not Started',
+            priority='Normal',
+        )
+
+        self.client.force_authenticate(user=self.supervisor_user)
+        response = self.client.post(
+            f'/api/services/service-tickets/{ticket.id}/auto_assign/',
+            {},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.technician, self.backup_technician)
 
     def test_warranty_case_requires_active_coverage(self):
         request_obj = ServiceRequest.objects.create(
@@ -1399,8 +2088,20 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
             format='json',
         )
         self.assertEqual(complete_response.status_code, status.HTTP_200_OK)
+        ticket.refresh_from_db()
 
-        follow_up_case = FollowUpCase.objects.get(service_ticket=ticket, creation_source='completion_flow')
+        warranty_case = FollowUpCase.objects.get(
+            service_ticket=ticket,
+            case_type='warranty',
+            creation_source='completion_flow',
+        )
+        self.assertEqual(warranty_case.due_date, ticket.warranty_end_date)
+
+        follow_up_case = FollowUpCase.objects.get(
+            service_ticket=ticket,
+            case_type='revisit',
+            creation_source='completion_flow',
+        )
         self.assertEqual(follow_up_case.case_type, 'revisit')
         self.assertEqual(follow_up_case.status, 'open')
         self.assertEqual(follow_up_case.created_by, self.technician_user)
@@ -1411,9 +2112,9 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
         self.client.force_authenticate(user=self.follow_up_user)
         dashboard_response = self.client.get('/api/services/dashboard/', format='json')
         self.assertEqual(dashboard_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(dashboard_response.data['overview']['completion_handoffs'], 1)
-        self.assertEqual(dashboard_response.data['overview']['follow_up_candidates'], 0)
-        self.assertEqual(dashboard_response.data['recent_cases'][0]['creation_source'], 'completion_flow')
+        self.assertEqual(dashboard_response.data['overview']['total_cases'], 2)
+        self.assertEqual(dashboard_response.data['overview']['open_cases'], 2)
+        self.assertEqual(dashboard_response.data['after_sales']['recent_cases'][0]['creation_source'], 'completion_flow')
 
     def test_updating_completed_checklist_updates_existing_completion_follow_up_case(self):
         request_obj = ServiceRequest.objects.create(
@@ -1781,7 +2482,7 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
 
         self.assertEqual(approve_response.status_code, status.HTTP_200_OK)
         ticket = ServiceTicket.objects.get(request=request_obj)
-        self.assertIsNone(ticket.supervisor)
+        self.assertEqual(ticket.supervisor, self.admin_user)
 
         self.client.force_authenticate(user=self.supervisor_user)
         queue_response = self.client.get('/api/services/service-tickets/')
@@ -1790,7 +2491,7 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
         self.assertEqual(queue_response.status_code, status.HTTP_200_OK)
         self.assertEqual(dashboard_response.status_code, status.HTTP_200_OK)
         self.assertIn(ticket.id, [item['id'] for item in queue_response.data['results']])
-        self.assertTrue(any(item['id'] == ticket.id for item in dashboard_response.data['recent_tickets']))
+        self.assertTrue(any(item['id'] == ticket.id for item in dashboard_response.data['operations']['recent_tickets']))
 
     def test_supervisor_without_ticket_queue_capability_cannot_approve_request(self):
         limited_supervisor = User.objects.create_user(
@@ -1991,7 +2692,7 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         ticket_ids = [item['id'] for item in response.data['ticketMarkers']]
         self.assertIn(owned_ticket.id, ticket_ids)
-        self.assertNotIn(other_ticket.id, ticket_ids)
+        self.assertIn(other_ticket.id, ticket_ids)
 
     def test_complete_work_requires_in_progress_ticket(self):
         request_obj = ServiceRequest.objects.create(
@@ -2012,12 +2713,82 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
         self.client.force_authenticate(user=self.technician_user)
         response = self.client.post(
             f'/api/services/service-tickets/{ticket.id}/complete_work/',
-            {},
+            {'completion_proof_images': ['https://example.com/proof/guard.jpg']},
             format='json',
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('Cannot move ticket', response.data['error'])
+
+    def test_technician_completion_requires_completed_checklist(self):
+        request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Checklist completion guard',
+            priority='Normal',
+            status='Approved',
+        )
+        ticket = ServiceTicket.objects.create(
+            request=request_obj,
+            technician=self.technician_user,
+            scheduled_date=timezone.localdate(),
+            status='In Progress',
+            priority='Normal',
+            start_time=timezone.now(),
+        )
+
+        self.client.force_authenticate(user=self.technician_user)
+        blocked_response = self.client.post(
+            f'/api/technician/jobs/{ticket.id}/status/',
+            {'status': 'completed'},
+            format='json',
+        )
+
+        self.assertEqual(blocked_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Complete the job checklist', blocked_response.data['error'])
+
+        InspectionChecklist.objects.create(
+            ticket=ticket,
+            is_completed=True,
+            completed_at=timezone.now(),
+            completed_by=self.technician_user,
+        )
+        completed_response = self.client.post(
+            f'/api/technician/jobs/{ticket.id}/status/',
+            {'status': 'completed'},
+            format='json',
+        )
+
+        self.assertEqual(completed_response.status_code, status.HTTP_200_OK)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, 'Completed')
+
+    def test_complete_work_requires_completed_checklist(self):
+        request_obj = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Checklist guard for complete work',
+            priority='Normal',
+            status='Approved',
+        )
+        ticket = ServiceTicket.objects.create(
+            request=request_obj,
+            technician=self.technician_user,
+            scheduled_date=timezone.localdate(),
+            status='In Progress',
+            priority='Normal',
+            start_time=timezone.now(),
+        )
+
+        self.client.force_authenticate(user=self.technician_user)
+        response = self.client.post(
+            f'/api/services/service-tickets/{ticket.id}/complete_work/',
+            {'completion_proof_images': ['https://example.com/proof/checklist.jpg']},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Complete the job checklist', response.data['error'])
 
     def test_parts_request_requires_started_work(self):
         request_obj = ServiceRequest.objects.create(
@@ -2365,6 +3136,32 @@ class SLAApiIntegrationTests(APITestCase):
         self.assertIn(first_ticket['sla']['rule'], {'start_delay', 'execution_delay'})
         self.assertIn(first_ticket['sla']['state'], {'warning', 'overdue'})
 
+    def test_unassigned_past_scheduled_ticket_is_missed_dispatch(self):
+        past_ticket = ServiceTicket.objects.create(
+            request=self.request_obj,
+            technician=None,
+            scheduled_date=self.now.date() - timedelta(days=1),
+            status='Not Started',
+            priority='Normal',
+        )
+
+        state = get_ticket_dispatch_state(past_ticket, now=self.now)
+
+        self.assertTrue(state['is_missed_dispatch'])
+        self.assertEqual(state['status'], 'missed_dispatch')
+        self.assertEqual(state['action'], 'Assign technician or reschedule')
+
+        with patch('services.sla.timezone.now', return_value=self.now):
+            response = self.client.get('/api/services/service-tickets/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        serialized_ticket = next(
+            item for item in response.data['results']
+            if item['id'] == past_ticket.id
+        )
+        self.assertTrue(serialized_ticket['is_missed_dispatch'])
+        self.assertEqual(serialized_ticket['dispatch_status'], 'missed_dispatch')
+
     def test_admin_dashboard_includes_sla_overview_and_queue(self):
         with patch('services.views_dashboard.process_maintenance_alerts'):
             with patch('services.views_dashboard.timezone.now', return_value=self.now):
@@ -2392,4 +3189,3 @@ class SLAApiIntegrationTests(APITestCase):
         self.assertEqual(response.data['sla_overview']['start_delay_risk'], 1)
         self.assertEqual(response.data['sla_overview']['execution_risk'], 1)
         self.assertEqual(len(response.data['sla_queue']), 2)
-

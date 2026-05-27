@@ -1,31 +1,57 @@
 """URL configuration for afn_service_management project."""
 
+import re
+
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+from django.contrib.staticfiles.views import serve as staticfiles_serve
+from django.urls import include, path, re_path
 
-from .views import backend_home, legacy_ui_redirect
+from .views import frontend_app, frontend_public_file
 
+admin.site.site_header = 'AFN Service Management Admin'
+admin.site.site_title = 'AFN Admin Portal'
+admin.site.index_title = 'Administration'
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('api.urls')),
-
-    # Retired template-era routes now fall back safely to the API root.
-    path('dashboard/', legacy_ui_redirect, name='dashboard'),
-    path('gis-dashboard/', legacy_ui_redirect, name='gis_dashboard'),
-    path('inspection/', legacy_ui_redirect, name='inspection'),
-    path('technicians/', legacy_ui_redirect, name='technicians'),
-    path('service-types/', legacy_ui_redirect, name='service_types'),
-    path('services/requests/', legacy_ui_redirect, name='service_requests'),
-    path('users/register/', legacy_ui_redirect, name='register'),
-    path('dashboard/admin/', legacy_ui_redirect, name='admin_dashboard'),
-    path('dashboard/technician/', legacy_ui_redirect, name='technician_dashboard'),
-    path('dashboard/client/', legacy_ui_redirect, name='client_dashboard'),
-
-    path('', backend_home, name='home'),
+    path('favicon.svg', frontend_public_file, {'filename': 'favicon.svg'}, name='frontend-favicon'),
+    path(
+        'firebase-messaging-sw.js',
+        frontend_public_file,
+        {'filename': 'firebase-messaging-sw.js'},
+        name='frontend-firebase-sw',
+    ),
 ]
+
+# With Channels/ASGI, static files are not auto-served like classic WSGI runserver.
+# django.conf.urls.static.static() returns [] when DEBUG=False, and staticfiles.views.serve
+# returns 404 unless insecure=True — so wire explicitly for local/Docker with DEBUG off.
+if getattr(settings, 'SERVE_STATIC_URLPATTERNS', settings.DEBUG):
+    if settings.DEBUG:
+        urlpatterns += staticfiles_urlpatterns()
+    else:
+        _prefix = settings.STATIC_URL
+        if not _prefix:
+            raise ValueError('STATIC_URL must be set when SERVE_STATIC_URLPATTERNS is enabled.')
+
+        def staticfiles_dev_serve(request, path):
+            return staticfiles_serve(request, path, insecure=True)
+
+        urlpatterns += [
+            re_path(
+                r'^%s(?P<path>.*)$' % re.escape(_prefix.lstrip('/')),
+                staticfiles_dev_serve,
+            ),
+        ]
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# React handles the non-API application routes after the initial HTML load.
+urlpatterns += [
+    re_path(r'^(?!api/|admin/|static/|media/).*$', frontend_app, name='frontend-app'),
+]

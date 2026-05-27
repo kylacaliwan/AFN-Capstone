@@ -14,12 +14,51 @@ class ServiceType(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     estimated_duration = models.IntegerField(default=60)  # in minutes
+    estimated_cost = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Estimated cost for this service type",
+    )
+    max_daily_assignments = models.PositiveIntegerField(
+        default=5,
+        help_text="Maximum number of this service type a technician can be assigned per day",
+    )
+    procedures = models.JSONField(
+        default=list, blank=True,
+        help_text="Ordered list of procedure steps, e.g. [{'step': 1, 'title': '...', 'description': '...'}]",
+    )
+    required_equipment = models.JSONField(
+        default=list, blank=True,
+        help_text="List of required tools/equipment, e.g. [{'name': 'Drill', 'quantity': 1}]",
+    )
 
     def __str__(self):
         return self.name
 
     class Meta:
         ordering = ['name']
+
+
+class SLARule(models.Model):
+    RULE_CHOICES = [
+        ('approval_delay', 'Approval delay'),
+        ('assignment_delay', 'Assignment delay'),
+        ('start_delay', 'Start delay'),
+        ('execution_delay', 'Execution delay'),
+        ('reschedule_delay', 'Reschedule delay'),
+    ]
+
+    key = models.CharField(max_length=40, choices=RULE_CHOICES, unique=True)
+    warning_minutes = models.PositiveIntegerField()
+    overdue_minutes = models.PositiveIntegerField()
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.get_key_display()} SLA"
+
+    class Meta:
+        ordering = ['key']
 
 
 class ServiceRequest(models.Model):
@@ -30,14 +69,21 @@ class ServiceRequest(models.Model):
         ('Completed', 'Completed'),
         ('Cancelled', 'Cancelled'),
     ]
-    
+
     PRIORITY_CHOICES = [
         ('Low', 'Low'),
         ('Normal', 'Normal'),
         ('High', 'High'),
         ('Urgent', 'Urgent'),
     ]
-    
+
+    REQUEST_SOURCE_CHOICES = [
+        ('client_portal', 'Client Portal'),
+        ('walk_in', 'Walk-in'),
+        ('phone', 'Phone'),
+        ('admin_created', 'Admin Created'),
+    ]
+
     client = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -54,10 +100,15 @@ class ServiceRequest(models.Model):
         blank=True,
         null=True,
     )
+    request_source = models.CharField(
+        max_length=30,
+        choices=REQUEST_SOURCE_CHOICES,
+        default='client_portal',
+    )
     scheduling_notes = models.TextField(blank=True, null=True)
-    request_date = models.DateTimeField(auto_now_add=True)
+    request_date = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     # Auto-ticket will be created when request is approved
     auto_ticket_created = models.BooleanField(default=False)
 
@@ -65,11 +116,33 @@ class ServiceRequest(models.Model):
         indexes = [
             models.Index(fields=['client_id', 'status']),
             models.Index(fields=['status', 'request_date']),
+            models.Index(fields=['request_source', 'request_date']),
         ]
         ordering = ['-request_date']
 
     def __str__(self):
         return f"{self.service_type.name} request by {self.client.username}"
+
+
+class ServiceRequestService(models.Model):
+    request = models.ForeignKey(ServiceRequest, on_delete=models.CASCADE, related_name='service_items')
+    service_type = models.ForeignKey(ServiceType, on_delete=models.CASCADE, related_name='request_items')
+    notes = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=50, choices=ServiceRequest.STATUS_CHOICES, default='Pending')
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sort_order', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['request', 'service_type'],
+                name='unique_service_type_per_request',
+            )
+        ]
+
+    def __str__(self):
+        return f"Request #{self.request_id}: {self.service_type.name}"
 
 
 class ServiceLocation(models.Model):
@@ -92,7 +165,7 @@ class ServiceTicket(models.Model):
         ('On Hold', 'On Hold'),
         ('Cancelled', 'Cancelled'),
     ]
-    
+
     PRIORITY_CHOICES = [
         ('Low', 'Low'),
         ('Normal', 'Normal'),
@@ -106,7 +179,7 @@ class ServiceTicket(models.Model):
         ('expired', 'Expired'),
         ('void', 'Void'),
     ]
-    
+
     request = models.ForeignKey(ServiceRequest, on_delete=models.CASCADE)
     technician = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -120,7 +193,7 @@ class ServiceTicket(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         related_name='supervised_tickets',
-        limit_choices_to={'role': 'supervisor'}
+        limit_choices_to={'role__in': ['superadmin', 'admin']},
     )
     scheduled_date = models.DateField()
     scheduled_time = models.TimeField(null=True, blank=True)
@@ -136,11 +209,11 @@ class ServiceTicket(models.Model):
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default="Not Started")
     priority = models.CharField(max_length=50, choices=PRIORITY_CHOICES, default="Normal")
     notes = models.TextField(blank=True, null=True)
-    
+
     # Client feedback
     client_rating = models.IntegerField(null=True, blank=True, choices=[(i, i) for i in range(1, 6)])  # 1-5 stars
     client_feedback = models.TextField(blank=True, null=True)
-    
+
     # For auto-assignment
     auto_assigned = models.BooleanField(default=False)
     assigned_at = models.DateTimeField(null=True, blank=True)
@@ -175,7 +248,7 @@ class ServiceTicket(models.Model):
         help_text="List of image URLs uploaded as proof of job completion"
     )
     completion_notes = models.TextField(blank=True, null=True)
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, null=True)
@@ -184,6 +257,10 @@ class ServiceTicket(models.Model):
         indexes = [
             models.Index(fields=['status', 'scheduled_date']),
             models.Index(fields=['technician_id', 'status']),
+            models.Index(fields=['supervisor_id', 'status']),
+            models.Index(fields=['supervisor_id', 'created_at']),
+            models.Index(fields=['completed_date']),
+            models.Index(fields=['scheduled_date', 'scheduled_time']),
             models.Index(fields=['status', 'created_at']),
             models.Index(fields=['auto_assigned', 'assigned_at']),
         ]
@@ -262,7 +339,7 @@ class AfterSalesCase(models.Model):
         null=True,
         blank=True,
         related_name='assigned_after_sales_cases',
-        limit_choices_to={'role': 'follow_up'}
+        limit_choices_to={'role__in': ['superadmin', 'admin']},
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -294,6 +371,12 @@ class AfterSalesCase(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'created_at']),
+            models.Index(fields=['assigned_to', 'status']),
+            models.Index(fields=['client', 'status']),
+            models.Index(fields=['due_date', 'status']),
+        ]
 
 
 class MaintenanceSchedule(models.Model):
@@ -333,6 +416,7 @@ class MaintenanceSchedule(models.Model):
     maintenance_notes = models.TextField(blank=True, null=True)
     due_soon_notified_at = models.DateTimeField(blank=True, null=True)
     due_notified_at = models.DateTimeField(blank=True, null=True)
+    client_notified_at = models.DateTimeField(blank=True, null=True)  # Track when client email was sent (1 week before)
     risk_level = models.CharField(max_length=20, default='normal')
     risk_score = models.FloatField(default=0)
     prediction_notes = models.TextField(blank=True, null=True)
@@ -344,6 +428,11 @@ class MaintenanceSchedule(models.Model):
 
     class Meta:
         ordering = ['next_due_date', 'id']
+        indexes = [
+            models.Index(fields=['status', 'next_due_date']),
+            models.Index(fields=['client', 'status']),
+            models.Index(fields=['service_type', 'status']),
+        ]
 
 
 class TechnicianSkill(models.Model):
@@ -352,7 +441,7 @@ class TechnicianSkill(models.Model):
         ('intermediate', 'Intermediate'),
         ('expert', 'Expert'),
     ]
-    
+
     technician = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -380,9 +469,15 @@ class ServiceStatusHistory(models.Model):
     )
     notes = models.TextField(blank=True, null=True)
     timestamp = models.DateTimeField(auto_now_add=True)
-    
+
     def __str__(self):
         return f"Ticket {self.ticket.id} - {self.status} at {self.timestamp}"
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['ticket', '-timestamp']),
+            models.Index(fields=['status', '-timestamp']),
+        ]
 
 
 # Pre-installation Inspection Checklist
@@ -404,25 +499,33 @@ class InspectionChecklist(models.Model):
         blank=True,
         related_name='completed_inspections'
     )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='submitted_inspection_checklists',
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True)
     is_completed = models.BooleanField(default=False)
-    
+
     # Site Assessment
     site_accessible = models.BooleanField(default=False)
     site_accessible_notes = models.TextField(blank=True, null=True)
-    
+
     # Electrical Check
     electrical_available = models.BooleanField(default=False)
     electrical_adequate = models.BooleanField(default=False)
     electrical_notes = models.TextField(blank=True, null=True)
-    
+
     # Structural Check
     roof_condition = models.CharField(max_length=100, blank=True, null=True)
     structural_assessment = models.TextField(blank=True, null=True)
-    
+
     # Safety Check
     safety_equipment_present = models.BooleanField(default=False)
     safety_hazards = models.TextField(blank=True, null=True)
-    
+
     # Overall
     recommendation = models.CharField(max_length=100, blank=True, null=True)  # Approved, Conditional, Rejected
     additional_notes = models.TextField(blank=True, null=True)
@@ -437,6 +540,10 @@ class InspectionChecklist(models.Model):
     )
     maintenance_interval_days = models.PositiveIntegerField(blank=True, null=True)
     maintenance_notes = models.TextField(blank=True, null=True)
+    service_type_label = models.CharField(max_length=255, blank=True, null=True)
+    procedure_source = models.CharField(max_length=30, blank=True, null=True)
+    checklist_items = models.JSONField(default=list, blank=True)
+    required_equipment_snapshot = models.JSONField(default=list, blank=True)
     proof_media = models.JSONField(default=list, blank=True)
     warranty_provided = models.BooleanField(default=False)
     warranty_period_days = models.PositiveIntegerField(blank=True, null=True)
@@ -451,7 +558,7 @@ class InspectionChecklist(models.Model):
     follow_up_due_date = models.DateField(blank=True, null=True)
     follow_up_summary = models.CharField(max_length=255, blank=True, null=True)
     follow_up_details = models.TextField(blank=True, null=True)
-    
+
     def __str__(self):
         return f"Inspection for Ticket {self.ticket.id}"
 
@@ -468,9 +575,15 @@ class TechnicianLocationHistory(models.Model):
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
     timestamp = models.DateTimeField(auto_now_add=True)
     accuracy = models.FloatField(default=0)  # GPS accuracy in meters
-    
+
     def __str__(self):
         return f"{self.technician.username} at {self.timestamp}"
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['technician', '-timestamp']),
+            models.Index(fields=['-timestamp']),
+        ]
 
 
 # Analytics Models for Descriptive and Predictive Analysis
@@ -478,31 +591,34 @@ class ServiceAnalytics(models.Model):
     """Aggregated analytics data for services"""
     date = models.DateField()
     service_type = models.ForeignKey(ServiceType, on_delete=models.CASCADE, null=True, blank=True)
-    
+
     # Descriptive metrics
     total_requests = models.IntegerField(default=0)
     completed_requests = models.IntegerField(default=0)
     pending_requests = models.IntegerField(default=0)
     cancelled_requests = models.IntegerField(default=0)
-    
+
     # Performance metrics
     avg_response_time_hours = models.FloatField(default=0)  # Average time to assign technician
     avg_completion_time_hours = models.FloatField(default=0)  # Average time to complete
     technician_utilization_rate = models.FloatField(default=0)  # Percentage of time technicians are busy
-    
+
     # Geographic metrics
     service_area_coverage = models.FloatField(default=0)  # Square km covered
     popular_locations = models.JSONField(default=list)  # Top service locations
-    
+
     # Customer satisfaction (placeholder for future ratings)
     satisfaction_score = models.FloatField(default=0)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         unique_together = ['date', 'service_type']
+        indexes = [
+            models.Index(fields=['service_type', '-date']),
+        ]
         ordering = ['-date']
-    
+
     def __str__(self):
         service_name = self.service_type.name if self.service_type else "All Services"
         return f"{service_name} Analytics - {self.date}"
@@ -512,31 +628,34 @@ class TechnicianPerformance(models.Model):
     """Individual technician performance metrics"""
     technician = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, limit_choices_to={'role': 'technician'})
     date = models.DateField()
-    
+
     # Work metrics
     tickets_assigned = models.IntegerField(default=0)
     tickets_completed = models.IntegerField(default=0)
     tickets_pending = models.IntegerField(default=0)
-    
+
     # Time metrics
     total_work_hours = models.FloatField(default=0)
     avg_response_time_hours = models.FloatField(default=0)
     avg_completion_time_hours = models.FloatField(default=0)
-    
+
     # Quality metrics
     customer_satisfaction = models.FloatField(default=0)
     rework_rate = models.FloatField(default=0)  # Percentage requiring rework
-    
+
     # Efficiency metrics
     distance_traveled_km = models.FloatField(default=0)
     fuel_efficiency = models.FloatField(default=0)  # km per liter
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         unique_together = ['technician', 'date']
+        indexes = [
+            models.Index(fields=['technician', '-date']),
+        ]
         ordering = ['-date']
-    
+
     def __str__(self):
         return f"{self.technician.username} Performance - {self.date}"
 
@@ -548,29 +667,33 @@ class DemandForecast(models.Model):
         ('weekly', 'Weekly'),
         ('monthly', 'Monthly'),
     ]
-    
+
     service_type = models.ForeignKey(ServiceType, on_delete=models.CASCADE, related_name='service_demands')
     forecast_date = models.DateField()  # Date this forecast is for
     forecast_period = models.CharField(max_length=20, choices=FORECAST_PERIODS, default='daily')
-    
+
     # Forecasted demand
     predicted_requests = models.IntegerField()
     confidence_level = models.FloatField(default=0.8)  # 0-1 confidence score
-    
+
     # Factors influencing forecast
     weather_impact = models.FloatField(default=0)  # -1 to 1 (negative/positive impact)
     seasonal_trend = models.FloatField(default=0)  # Seasonal adjustment factor
     historical_average = models.IntegerField(default=0)  # Base historical average
-    
+
     # Forecast accuracy tracking
     actual_requests = models.IntegerField(null=True, blank=True)  # Filled in after the date
     forecast_accuracy = models.FloatField(null=True, blank=True)  # Calculated accuracy
-    
+
     generated_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
+        indexes = [
+            models.Index(fields=['service_type', 'forecast_period', 'forecast_date']),
+            models.Index(fields=['forecast_date']),
+        ]
         ordering = ['-forecast_date']
-    
+
     def __str__(self):
         return f"{self.service_type.name} forecast for {self.forecast_date} ({self.predicted_requests} requests)"
 
@@ -583,29 +706,32 @@ class ServiceTrend(models.Model):
         ('monthly', 'Monthly'),
         ('yearly', 'Yearly'),
     ]
-    
+
     service_type = models.ForeignKey(ServiceType, on_delete=models.CASCADE)
     trend_type = models.CharField(max_length=20, choices=TREND_TYPES)
     period_start = models.DateField()
     period_end = models.DateField()
-    
+
     # Trend metrics
     average_requests = models.FloatField()
     peak_day = models.CharField(max_length=20, blank=True)  # e.g., "Monday", "Winter"
     peak_hour = models.IntegerField(null=True, blank=True)  # 0-23
-    
+
     # Growth indicators
     growth_rate = models.FloatField(default=0)  # Percentage change
     trend_direction = models.CharField(max_length=20, default='stable')  # increasing, decreasing, stable
-    
+
     # Statistical measures
     standard_deviation = models.FloatField(default=0)
     confidence_interval = models.JSONField(default=dict)  # min/max confidence bounds
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
+        indexes = [
+            models.Index(fields=['service_type', 'trend_type', 'period_start', 'period_end']),
+        ]
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"{self.service_type.name} {self.trend_type} trend ({self.period_start} to {self.period_end})"
