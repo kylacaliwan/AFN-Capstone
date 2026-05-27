@@ -1,0 +1,170 @@
+import { useEffect, useState } from 'react';
+import { FiCalendar, FiClock, FiX } from 'react-icons/fi';
+import { formatTicketId } from '../../utils/roleIds';
+
+const timeSlotOptions = [
+  { value: '', label: 'Time to be confirmed' },
+  { value: 'morning', label: 'Morning' },
+  { value: 'midday', label: 'Midday' },
+  { value: 'afternoon', label: 'Afternoon' },
+  { value: 'evening', label: 'Evening' }
+];
+
+const getTodayKey = () => new Date().toISOString().slice(0, 10);
+
+const normalizeTimeInput = (value) => {
+  if (!value) return '';
+  return String(value).slice(0, 5);
+};
+
+export default function RescheduleTicketModal({ ticket, onClose, onSubmit }) {
+  const [form, setForm] = useState({
+    scheduledDate: '',
+    scheduledTimeSlot: '',
+    scheduledTime: '',
+    notes: ''
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!ticket) return;
+    setForm({
+      scheduledDate: ticket.scheduledDate || ticket.date || getTodayKey(),
+      scheduledTimeSlot: ticket.scheduledTimeSlot || ticket.time_slot || '',
+      scheduledTime: normalizeTimeInput(ticket.scheduledTime || ticket.time),
+      notes: ticket.schedulingNotes || ticket.scheduling_notes || ''
+    });
+    setError('');
+    setSubmitting(false);
+  }, [ticket]);
+
+  if (!ticket) return null;
+
+  const ticketId = ticket.ticket_id || ticket.id;
+  const clientName = ticket.clientFullname || ticket.client || 'Client';
+  const serviceName = ticket.service || ticket.service_type || 'Service';
+  const canReschedule = (ticket.status || '').toString().toLowerCase().replace(/\s+/g, '_') === 'not_started';
+
+  const updateField = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    setError('');
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!form.scheduledDate) {
+      setError('Choose the new scheduled date.');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await onSubmit(ticketId, form);
+    } catch (submitError) {
+      setError(submitError.message || 'Unable to reschedule ticket.');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="w-full max-w-lg rounded-2xl border border-surface-200 bg-white shadow-elevated">
+        <div className="flex items-start justify-between gap-4 border-b border-surface-200 p-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-500">Reschedule Ticket</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-900">{formatTicketId(ticketId)}</h2>
+            <p className="mt-1 text-sm text-slate-500">{serviceName} for {clientName}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-surface-200 bg-white p-2 text-slate-500 transition hover:bg-surface-50 hover:text-slate-700"
+            aria-label="Close reschedule dialog"
+          >
+            <FiX />
+          </button>
+        </div>
+
+        {!canReschedule && (
+          <div className="mx-5 mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Only tickets that have not started can be rescheduled.
+          </div>
+        )}
+
+        {error && (
+          <div className="mx-5 mt-5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="p-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-sm font-medium text-slate-700">
+              <span className="flex items-center gap-2"><FiCalendar /> New Date</span>
+              <input
+                type="date"
+                min={getTodayKey()}
+                value={form.scheduledDate}
+                onChange={(event) => updateField('scheduledDate', event.target.value)}
+                className="mt-1 w-full rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+              />
+            </label>
+
+            <label className="block text-sm font-medium text-slate-700">
+              <span className="flex items-center gap-2"><FiClock /> Time Slot</span>
+              <select
+                value={form.scheduledTimeSlot}
+                onChange={(event) => updateField('scheduledTimeSlot', event.target.value)}
+                className="mt-1 w-full rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+              >
+                {timeSlotOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="mt-4 block text-sm font-medium text-slate-700">
+            Exact Time
+            <input
+              type="time"
+              value={form.scheduledTime}
+              onChange={(event) => updateField('scheduledTime', event.target.value)}
+              className="mt-1 w-full rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            />
+          </label>
+
+          <label className="mt-4 block text-sm font-medium text-slate-700">
+            Notes
+            <textarea
+              value={form.notes}
+              onChange={(event) => updateField('notes', event.target.value)}
+              rows={3}
+              className="mt-1 w-full rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+              placeholder="Optional scheduling note for the client and dispatch record."
+            />
+          </label>
+
+          <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center justify-center rounded-lg border border-surface-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-surface-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canReschedule || submitting}
+              className="inline-flex items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submitting ? 'Saving...' : 'Save Schedule'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

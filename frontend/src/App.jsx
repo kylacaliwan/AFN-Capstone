@@ -1,17 +1,10 @@
 import { Suspense, lazy, useEffect } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { useFirebase } from './hooks/useFirebase';
 import {
+  ADMIN_JOB_HISTORY_CAPABILITIES,
   AFTER_SALES_CASE_CAPABILITIES,
-  AFTER_SALES_DASHBOARD_CAPABILITIES,
-  AFTER_SALES_NAV_CAPABILITIES,
-  CAPABILITIES,
-  SUPERVISOR_DASHBOARD_CAPABILITIES,
-  SUPERVISOR_DISPATCH_CAPABILITIES,
-  SUPERVISOR_TICKETS_CAPABILITIES,
-  SUPERVISOR_TRACKING_CAPABILITIES,
-  SUPERVISOR_USER_ACCESS_CAPABILITIES,
   TECHNICIAN_CHECKLIST_CAPABILITIES,
   TECHNICIAN_DASHBOARD_CAPABILITIES,
   TECHNICIAN_HISTORY_CAPABILITIES,
@@ -30,16 +23,13 @@ const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
-const SharedOperationsDashboard = lazy(() => import('./pages/shared/SharedOperationsDashboard'));
-const SupervisorDashboard = lazy(() => import('./pages/supervisor/SupervisorDashboard'));
+const AdminCalendar = lazy(() => import('./pages/admin/AdminCalendar'));
 const TechnicianDashboard = lazy(() => import('./pages/technician/TechnicianDashboard'));
 const ClientDashboard = lazy(() => import('./pages/client/ClientDashboard'));
-const FollowUpDashboard = lazy(() => import('./pages/follow_up/FollowUpDashboard'));
 const FollowUpCases = lazy(() => import('./pages/follow_up/FollowUpCases'));
 const ClientRequestTracking = lazy(() => import('./pages/client/ClientRequestTracking'));
 const ClientRequestDetail = lazy(() => import('./pages/client/ClientRequestDetail'));
 const ClientServiceHistory = lazy(() => import('./pages/client/ClientServiceHistory'));
-const ClientMessages = lazy(() => import('./pages/client/ClientMessages'));
 const ClientNotifications = lazy(() => import('./pages/client/ClientNotifications'));
 const ClientProfile = lazy(() => import('./pages/client/ClientProfile'));
 const AdminServiceTickets = lazy(() => import('./pages/admin/AdminServiceTickets'));
@@ -47,12 +37,12 @@ const AdminTechnicianTracking = lazy(() => import('./pages/admin/AdminTechnician
 const AdminServices = lazy(() => import('./pages/admin/AdminServices'));
 const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics'));
 const AdminReports = lazy(() => import('./pages/admin/AdminReports'));
+const AdminOperationsReport = lazy(() => import('./pages/admin/AdminOperationsReport'));
 const AdminUserManagement = lazy(() => import('./pages/admin/AdminUserManagement'));
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'));
+const AdminActivityLogs = lazy(() => import('./pages/admin/AdminActivityLogs'));
 const CoverageHeatmap = lazy(() => import('./pages/admin/CoverageHeatmap'));
 const AdminDispatchBoard = lazy(() => import('./pages/admin/AdminDispatchBoard'));
-const SupervisorTracking = lazy(() => import('./pages/supervisor/SupervisorTracking'));
-const DispatchBoard = lazy(() => import('./pages/supervisor/DispatchBoard'));
 const TechnicianJobs = lazy(() => import('./pages/technician/TechnicianJobs'));
 const ClientServiceRequests = lazy(() => import('./pages/client/ClientServiceRequests'));
 const TechnicianSchedule = lazy(() => import('./pages/technician/TechnicianSchedule'));
@@ -62,6 +52,7 @@ const TechnicianMessages = lazy(() => import('./pages/technician/TechnicianMessa
 const TechnicianJobHistory = lazy(() => import('./pages/technician/TechnicianJobHistory'));
 const TechnicianProfile = lazy(() => import('./pages/technician/TechnicianProfile'));
 const AdminInventory = lazy(() => import('./pages/admin/AdminInventory'));
+const AdminJobHistory = lazy(() => import('./pages/admin/AdminJobHistory'));
 
 const getDashboardPath = (user) => {
   if (!user) {
@@ -70,33 +61,6 @@ const getDashboardPath = (user) => {
 
   if (canAccessAdminWorkspace(user)) {
     return '/admin/dashboard';
-  }
-
-  if (user.role === 'follow_up') {
-    if (hasAnyCapability(user, AFTER_SALES_DASHBOARD_CAPABILITIES)) {
-      return '/follow-up/dashboard';
-    }
-    if (hasAnyCapability(user, AFTER_SALES_CASE_CAPABILITIES)) {
-      return '/follow-up/cases';
-    }
-  }
-
-  if (user.role === 'supervisor') {
-    if (hasAnyCapability(user, SUPERVISOR_DASHBOARD_CAPABILITIES)) {
-      return '/supervisor/dashboard';
-    }
-    if (hasAnyCapability(user, SUPERVISOR_DISPATCH_CAPABILITIES)) {
-      return '/supervisor/dispatch-board';
-    }
-    if (hasAnyCapability(user, SUPERVISOR_TICKETS_CAPABILITIES)) {
-      return '/supervisor/service-tickets';
-    }
-    if (hasAnyCapability(user, SUPERVISOR_TRACKING_CAPABILITIES)) {
-      return '/supervisor/technician-tracking';
-    }
-    if (hasAnyCapability(user, SUPERVISOR_USER_ACCESS_CAPABILITIES)) {
-      return '/supervisor/user-access';
-    }
   }
 
   if (user.role === 'technician') {
@@ -133,7 +97,23 @@ const getDashboardPath = (user) => {
   return '/login';
 };
 
-const RoleRedirect = ({ user }) => <Navigate to={getDashboardPath(user)} replace />;
+function RoleRedirect() {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  const target = user ? getDashboardPath(user) : '/login';
+
+  // STOP infinite redirect
+  if (location.pathname === target) {
+    return null;
+  }
+
+  return <Navigate to={target} replace />;
+}
 
 const ProtectedRoute = ({ role, allowedRoles = [], requiredAnyCapability = [], children }) => {
   const { user, isAuthenticated } = useAuth();
@@ -174,13 +154,14 @@ function AppRoutes() {
       {isAuthenticated ? <FirebaseBootstrap /> : null}
       <Suspense fallback={<div className="grid min-h-screen place-items-center text-slate-600">Loading...</div>}>
         <Routes>
-          <Route path="/" element={<RoleRedirect user={isAuthenticated ? user : null} />} />
+          <Route path="/" element={<RoleRedirect />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
 
           <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/calendar" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminCalendar /></ProtectedRoute>} />
           <Route path="/admin/service-tickets" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminServiceTickets /></ProtectedRoute>} />
           <Route path="/admin/dispatch-board" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminDispatchBoard /></ProtectedRoute>} />
           <Route path="/admin/technician-tracking" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminTechnicianTracking /></ProtectedRoute>} />
@@ -196,6 +177,13 @@ function AppRoutes() {
           <Route path="/admin/inventory" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminInventory /></ProtectedRoute>} />
           <Route path="/admin/analytics" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminAnalytics /></ProtectedRoute>} />
           <Route path="/admin/reports" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminReports /></ProtectedRoute>} />
+          <Route path="/admin/operations-report" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminOperationsReport /></ProtectedRoute>} />
+          <Route path="/admin/after-sales-cases" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']} requiredAnyCapability={AFTER_SALES_CASE_CAPABILITIES}><FollowUpCases /></ProtectedRoute>} />
+          <Route path="/supervisor/dashboard" element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="/supervisor/dispatch-board" element={<Navigate to="/admin/dispatch-board" replace />} />
+          <Route path="/supervisor/technician-tracking" element={<Navigate to="/admin/technician-tracking" replace />} />
+          <Route path="/supervisor/service-tickets" element={<Navigate to="/admin/service-tickets" replace />} />
+          <Route path="/supervisor/user-access" element={<Navigate to="/admin/user-management" replace />} />
           <Route
             path="/admin/user-management"
             element={
@@ -205,43 +193,12 @@ function AppRoutes() {
             }
           />
           <Route path="/admin/settings" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/activity-logs" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminActivityLogs /></ProtectedRoute>} />
+          <Route path="/admin/messages" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><TechnicianMessages /></ProtectedRoute>} />
           <Route path="/admin/coverage-heatmap" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><CoverageHeatmap /></ProtectedRoute>} />
-
-          {/* Shared Operations Dashboard - Accessible by Superadmin, Supervisor, and Aftersales */}
-          <Route path="/admin/operations-dashboard" element={<ProtectedRoute allowedRoles={['superadmin', 'admin', 'supervisor', 'follow_up']}><SharedOperationsDashboard /></ProtectedRoute>} />
-
-          <Route
-            path="/follow-up/dashboard"
-            element={
-              <ProtectedRoute role="follow_up" requiredAnyCapability={AFTER_SALES_NAV_CAPABILITIES}>
-                <SharedOperationsDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/follow-up/cases"
-            element={
-              <ProtectedRoute role="follow_up" requiredAnyCapability={AFTER_SALES_NAV_CAPABILITIES}>
-                <FollowUpCases />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route path="/supervisor/dashboard" element={<ProtectedRoute role="supervisor" requiredAnyCapability={SUPERVISOR_DASHBOARD_CAPABILITIES}><SharedOperationsDashboard /></ProtectedRoute>} />
-          <Route path="/supervisor/dispatch-board" element={<ProtectedRoute role="supervisor" requiredAnyCapability={SUPERVISOR_DISPATCH_CAPABILITIES}><DispatchBoard /></ProtectedRoute>} />
-          <Route path="/supervisor/service-tickets" element={<ProtectedRoute role="supervisor" requiredAnyCapability={SUPERVISOR_TICKETS_CAPABILITIES}><AdminServiceTickets /></ProtectedRoute>} />
-          <Route path="/supervisor/technician-tracking" element={<ProtectedRoute role="supervisor" requiredAnyCapability={SUPERVISOR_TRACKING_CAPABILITIES}><SupervisorTracking /></ProtectedRoute>} />
-          <Route
-            path="/supervisor/user-access"
-            element={
-              <ProtectedRoute
-                role="supervisor"
-                requiredAnyCapability={SUPERVISOR_USER_ACCESS_CAPABILITIES}
-              >
-                <AdminUserManagement />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/admin/job-history" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']} requiredAnyCapability={ADMIN_JOB_HISTORY_CAPABILITIES}><AdminJobHistory /></ProtectedRoute>} />
+          <Route path="/follow-up/dashboard" element={<Navigate to="/admin/dashboard#after-sales" replace />} />
+          <Route path="/follow-up/cases" element={<Navigate to="/admin/after-sales-cases" replace />} />
 
           <Route path="/technician/dashboard" element={<ProtectedRoute role="technician" requiredAnyCapability={TECHNICIAN_DASHBOARD_CAPABILITIES}><TechnicianDashboard /></ProtectedRoute>} />
           <Route path="/technician/my-jobs" element={<ProtectedRoute role="technician" requiredAnyCapability={TECHNICIAN_JOBS_CAPABILITIES}><TechnicianJobs /></ProtectedRoute>} />
@@ -257,7 +214,6 @@ function AppRoutes() {
           <Route path="/client/requests" element={<ProtectedRoute role="client"><ClientRequestTracking /></ProtectedRoute>} />
           <Route path="/client/requests/:requestId" element={<ProtectedRoute role="client"><ClientRequestDetail /></ProtectedRoute>} />
           <Route path="/client/service-history" element={<ProtectedRoute role="client"><ClientServiceHistory /></ProtectedRoute>} />
-          <Route path="/client/messages" element={<ProtectedRoute role="client"><ClientMessages /></ProtectedRoute>} />
           <Route path="/client/notifications" element={<ProtectedRoute role="client"><ClientNotifications /></ProtectedRoute>} />
           <Route path="/client/profile" element={<ProtectedRoute role="client"><ClientProfile /></ProtectedRoute>} />
 

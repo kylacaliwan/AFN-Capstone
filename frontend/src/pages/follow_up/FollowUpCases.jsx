@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import Layout from '../../components/Layout';
-import StatusBadge from '../../components/StatusBadge';
+import { FiAlertCircle, FiCheckCircle, FiClock, FiRefreshCw } from 'react-icons/fi';
+import Layout from '../../components/layout/Layout';
+import StatusBadge from '../../components/ui/StatusBadge';
 import {
   createFollowUpCase,
   fetchFollowUpCases,
   fetchServiceTickets,
   updateFollowUpCase
 } from '../../api/api';
+import { formatTicketId } from '../../utils/roleIds';
 
 const CASE_TYPE_OPTIONS = [
   { value: 'follow_up', label: 'After Sales' },
@@ -18,20 +20,6 @@ const CASE_TYPE_OPTIONS = [
   { value: 'feedback', label: 'Feedback' }
 ];
 
-const CASE_TYPE_LABELS = Object.fromEntries(
-  CASE_TYPE_OPTIONS.map((option) => [option.value, option.label])
-);
-const CREATION_SOURCE_LABELS = {
-  manual: 'Manual',
-  completion_flow: 'From Completion',
-  maintenance_alert: 'Maintenance Alert'
-};
-const CREATION_SOURCE_TONES = {
-  manual: 'bg-slate-200 text-slate-700',
-  completion_flow: 'bg-amber-100 text-amber-800',
-  maintenance_alert: 'bg-emerald-100 text-emerald-800'
-};
-
 const PRIORITY_OPTIONS = [
   { value: 'low', label: 'Low' },
   { value: 'normal', label: 'Normal' },
@@ -40,18 +28,32 @@ const PRIORITY_OPTIONS = [
 ];
 
 const STATUS_FILTER_OPTIONS = [
-  { value: 'all', label: 'All cases' },
+  { value: 'all', label: 'All' },
   { value: 'open_work', label: 'Open work' },
   { value: 'overdue', label: 'Overdue' },
-  { value: 'open', label: 'Open only' },
+  { value: 'open', label: 'Open' },
   { value: 'in_progress', label: 'In progress' },
   { value: 'resolved', label: 'Resolved' },
   { value: 'closed', label: 'Closed' }
 ];
 
-const DIRECT_STATUS_VALUES = ['open', 'in_progress', 'resolved', 'closed'];
-const OPEN_WORK_STATUSES = ['open', 'in_progress'];
+const SOURCE_FILTER_OPTIONS = [
+  { value: 'all', label: 'All sources' },
+  { value: 'completion_flow', label: 'Technician' },
+  { value: 'maintenance_alert', label: 'Maintenance' },
+  { value: 'manual', label: 'Manual' }
+];
+
+const CASE_TYPE_LABELS = Object.fromEntries(CASE_TYPE_OPTIONS.map((option) => [option.value, option.label]));
 const CASE_TYPE_VALUES = CASE_TYPE_OPTIONS.map((option) => option.value);
+const PRIORITY_VALUES = PRIORITY_OPTIONS.map((option) => option.value);
+const SOURCE_VALUES = SOURCE_FILTER_OPTIONS.map((option) => option.value).filter((value) => value !== 'all');
+
+const SOURCE_LABELS = {
+  manual: 'Manual',
+  completion_flow: 'Technician',
+  maintenance_alert: 'Maintenance'
+};
 
 const emptyForm = {
   service_ticket: '',
@@ -64,7 +66,7 @@ const emptyForm = {
 };
 
 const formatDate = (value) => {
-  if (!value) return 'No date set';
+  if (!value) return 'No date';
 
   try {
     return new Intl.DateTimeFormat('en-US', {
@@ -79,46 +81,43 @@ const formatDate = (value) => {
 
 const formatCaseType = (value) => CASE_TYPE_LABELS[value] || String(value || '').replace('_', ' ');
 
-const getPreferredCaseType = (caseTypeFilter) => (
-  CASE_TYPE_VALUES.includes(caseTypeFilter) ? caseTypeFilter : emptyForm.case_type
+const TYPE_CHIP_CLASSES = {
+  follow_up: 'bg-sky-50 text-sky-700 ring-sky-200',
+  maintenance: 'bg-violet-50 text-violet-700 ring-violet-200',
+  complaint: 'bg-rose-50 text-rose-700 ring-rose-200',
+  warranty: 'bg-amber-50 text-amber-700 ring-amber-200',
+  revisit: 'bg-orange-50 text-orange-700 ring-orange-200',
+  feedback: 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+};
+
+const SOURCE_CHIP_CLASSES = {
+  completion_flow: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  maintenance_alert: 'bg-violet-50 text-violet-700 ring-violet-200',
+  manual: 'bg-slate-100 text-slate-700 ring-slate-200'
+};
+
+const getCaseTitle = (caseItem) => {
+  const summary = String(caseItem.summary || '').trim();
+  const weakSummary = !summary || summary.length < 8 || /^[a-z]{1,4}$/i.test(summary);
+
+  if (!weakSummary && /^scheduled maintenance is approaching/i.test(summary)) {
+    return `Scheduled maintenance for ${caseItem.client_full_name || caseItem.client_name || 'client'}`;
+  }
+
+  if (!weakSummary) return summary;
+
+  const typeLabel = formatCaseType(caseItem.case_type);
+  const serviceName = caseItem.service_type_name || 'service';
+  return `${typeLabel} case for ${serviceName}`;
+};
+
+const getContactLine = (caseItem) => (
+  [caseItem.client_phone, caseItem.client_email].filter(Boolean).join(' / ') || 'No contact'
 );
 
-const isOverdueCase = (caseItem) => {
-  if (!OPEN_WORK_STATUSES.includes(caseItem.status) || !caseItem.due_date) {
-    return false;
-  }
-
-  const dueDate = new Date(caseItem.due_date);
-  if (Number.isNaN(dueDate.getTime())) {
-    return false;
-  }
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return dueDate < today;
-};
-
-const renderClientDetails = (caseItem) => {
-  const details = [
-    caseItem.client_phone ? `Phone: ${caseItem.client_phone}` : null,
-    caseItem.client_email ? `Email: ${caseItem.client_email}` : null,
-    caseItem.service_address ? `Address: ${caseItem.service_address}` : null
-  ].filter(Boolean);
-
-  if (details.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="mt-4 flex flex-wrap gap-2">
-      {details.map((detail) => (
-        <span key={detail} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-          {detail}
-        </span>
-      ))}
-    </div>
-  );
-};
+const getSourceLabel = (caseItem) => (
+  caseItem.creation_source_label || SOURCE_LABELS[caseItem.creation_source] || 'Manual'
+);
 
 export default function FollowUpCases() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -126,31 +125,24 @@ export default function FollowUpCases() {
   const [completedTickets, setCompletedTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const statusFilter = searchParams.get('status') || 'all';
   const caseTypeFilter = searchParams.get('case_type') || 'all';
-  const [form, setForm] = useState({
-    ...emptyForm,
-    case_type: getPreferredCaseType(searchParams.get('case_type'))
-  });
-
-  const activeFilters = [
-    statusFilter !== 'all'
-      ? STATUS_FILTER_OPTIONS.find((option) => option.value === statusFilter)?.label
-      : null,
-    caseTypeFilter !== 'all'
-      ? CASE_TYPE_OPTIONS.find((option) => option.value === caseTypeFilter)?.label
-      : null
-  ].filter(Boolean);
+  const priorityFilter = searchParams.get('priority') || 'all';
+  const sourceFilter = searchParams.get('source') || 'all';
+  const appliedSearch = searchParams.get('search') || '';
+  const [searchTerm, setSearchTerm] = useState(appliedSearch);
+  const [form, setForm] = useState(emptyForm);
 
   const load = async ({ preserveMessage = false } = {}) => {
     const requestFilters = {};
 
-    if (DIRECT_STATUS_VALUES.includes(statusFilter)) {
-      requestFilters.status = statusFilter;
-    }
-    if (CASE_TYPE_VALUES.includes(caseTypeFilter)) {
-      requestFilters.caseType = caseTypeFilter;
-    }
+    if (statusFilter !== 'all') requestFilters.status = statusFilter;
+    if (CASE_TYPE_VALUES.includes(caseTypeFilter)) requestFilters.caseType = caseTypeFilter;
+    if (PRIORITY_VALUES.includes(priorityFilter)) requestFilters.priority = priorityFilter;
+    if (SOURCE_VALUES.includes(sourceFilter)) requestFilters.creationSource = sourceFilter;
+    if (appliedSearch.trim()) requestFilters.search = appliedSearch.trim();
+    requestFilters.ordering = statusFilter === 'overdue' ? 'due_date' : '-created_at';
 
     setLoading(true);
     try {
@@ -158,30 +150,15 @@ export default function FollowUpCases() {
         fetchFollowUpCases(requestFilters),
         fetchServiceTickets({ workspace: 'after_sales' })
       ]);
-
       const eligibleTickets = ticketList.filter((ticket) => ticket.status === 'completed');
-      const filteredCases = caseList.filter((caseItem) => {
-        if (statusFilter === 'open_work') {
-          return OPEN_WORK_STATUSES.includes(caseItem.status);
-        }
-        if (statusFilter === 'overdue') {
-          return isOverdueCase(caseItem);
-        }
-        return true;
-      });
 
-      setCases(filteredCases);
+      setCases(caseList);
       setCompletedTickets(eligibleTickets);
       setForm((current) => ({
         ...current,
-        case_type: CASE_TYPE_VALUES.includes(caseTypeFilter)
-          ? getPreferredCaseType(caseTypeFilter)
-          : current.case_type,
         service_ticket: current.service_ticket || eligibleTickets[0]?.id || ''
       }));
-      if (!preserveMessage) {
-        setMessage('');
-      }
+      if (!preserveMessage) setMessage('');
     } catch (error) {
       setCases([]);
       setCompletedTickets([]);
@@ -193,7 +170,30 @@ export default function FollowUpCases() {
 
   useEffect(() => {
     load();
-  }, [statusFilter, caseTypeFilter]);
+  }, [statusFilter, caseTypeFilter, priorityFilter, sourceFilter, appliedSearch]);
+
+  useEffect(() => {
+    setSearchTerm(appliedSearch);
+  }, [appliedSearch]);
+
+  const updateFilter = (key, value) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (!value || value === 'all') {
+      nextParams.delete(key);
+    } else {
+      nextParams.set(key, value);
+    }
+    setSearchParams(nextParams);
+  };
+
+  const clearFilters = () => {
+    setSearchParams(new URLSearchParams());
+  };
+
+  const applySearch = (event) => {
+    event.preventDefault();
+    updateFilter('search', searchTerm.trim());
+  };
 
   const createCase = async () => {
     try {
@@ -203,9 +203,9 @@ export default function FollowUpCases() {
         due_date: form.due_date || null
       });
       setMessage('After-sales case created.');
+      setShowCreateForm(false);
       setForm({
         ...emptyForm,
-        case_type: getPreferredCaseType(caseTypeFilter),
         service_ticket: completedTickets[0]?.id || ''
       });
       await load({ preserveMessage: true });
@@ -224,282 +224,434 @@ export default function FollowUpCases() {
     }
   };
 
-  const availableTicketOptions = completedTickets;
+  const hasFilters = [statusFilter, caseTypeFilter, priorityFilter, sourceFilter].some((value) => value !== 'all') || Boolean(appliedSearch);
 
-  const updateFilter = (key, value) => {
-    const nextParams = new URLSearchParams(searchParams);
-    if (!value || value === 'all') {
-      nextParams.delete(key);
-    } else {
-      nextParams.set(key, value);
-    }
-    setSearchParams(nextParams);
-  };
-
-  const clearFilters = () => {
-    setSearchParams(new URLSearchParams());
-  };
+  const openCases = cases.filter((c) => c.status === 'open');
+  const inProgressCases = cases.filter((c) => c.status === 'in_progress');
+  const overdueCases = cases.filter((c) => c.status === 'overdue');
+  const resolvedCases = cases.filter((c) => c.status === 'resolved');
 
   return (
     <Layout>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold">After Sales Case Queue</h2>
-          <p className="text-slate-600">Open and manage after-sales work tied to completed service tickets.</p>
-        </div>
-        <div className="text-sm text-teal-700">{message}</div>
-      </div>
-
-      <div className="mb-6 rounded-2xl bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold">Queue Filters</h3>
-            <p className="text-sm text-slate-500">Use the dashboard shortcuts or filter the after-sales queue directly here.</p>
-          </div>
-          {activeFilters.length > 0 && (
-            <button
-              onClick={clearFilters}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.2fr]">
-          <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Status view</label>
-            <select
-              value={statusFilter}
-              onChange={(e) => updateFilter('status', e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-            >
-              {STATUS_FILTER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Case type</label>
-            <select
-              value={caseTypeFilter}
-              onChange={(e) => updateFilter('case_type', e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-            >
-              <option value="all">All case types</option>
-              {CASE_TYPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {activeFilters.length > 0
-              ? `Active filters: ${activeFilters.join(' | ')}`
-              : 'Showing all after-sales work tied to completed service tickets.'}
-          </div>
-        </div>
-      </div>
-
-      <div className="mb-6 rounded-2xl bg-white p-6 shadow-sm">
-        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-          Technician handoffs now create after-sales cases automatically when the checklist flags follow-up work.
-          Use manual case creation here for exceptions, customer complaints that arrive later, or admin-led interventions.
-        </div>
-        <h3 className="mb-4 text-lg font-semibold">Open New After-Sales Case</h3>
-        <p className="mb-4 text-sm text-slate-500">
-          Manual cases are best for work that did not originate directly from a technician completion handoff.
-        </p>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Completed Ticket</label>
-            <select
-              value={form.service_ticket}
-              onChange={(e) => setForm({ ...form, service_ticket: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-            >
-              {availableTicketOptions.length > 0 ? (
-                availableTicketOptions.map((ticket) => (
-                  <option key={ticket.id} value={ticket.id}>
-                    #{ticket.id} {ticket.client} - {ticket.service}
-                  </option>
-                ))
-              ) : (
-                <option value="">No completed tickets available</option>
-              )}
-            </select>
-          </div>
-          <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Case Type</label>
-            <select
-              value={form.case_type}
-              onChange={(e) => setForm({ ...form, case_type: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-            >
-              {CASE_TYPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Priority</label>
-            <select
-              value={form.priority}
-              onChange={(e) => setForm({ ...form, priority: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-            >
-              {PRIORITY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="md:col-span-2 xl:col-span-3">
-            <label className="mb-2 block text-sm font-medium text-slate-700">Summary</label>
-            <input
-              value={form.summary}
-              onChange={(e) => setForm({ ...form, summary: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-              placeholder="Customer requested an after-sales callback on the completed job"
-            />
-          </div>
-          <div className="md:col-span-2 xl:col-span-3">
-            <label className="mb-2 block text-sm font-medium text-slate-700">Details</label>
-            <textarea
-              value={form.details}
-              onChange={(e) => setForm({ ...form, details: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-              rows="4"
-              placeholder="Capture after-sales notes, complaint details, or warranty context."
-            />
-          </div>
-          <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Due Date</label>
-            <input
-              type="date"
-              value={form.due_date}
-              onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-            />
-          </div>
-          <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={form.requires_revisit}
-              onChange={(e) => setForm({ ...form, requires_revisit: e.target.checked })}
-            />
-            Requires revisit
-          </label>
-        </div>
-        <button
-          onClick={createCase}
-          disabled={!form.service_ticket || !form.summary}
-          className="mt-4 rounded-xl bg-primary px-4 py-2 text-white disabled:opacity-50"
-        >
-          Create Case
-        </button>
-      </div>
-
-      <div className="rounded-2xl bg-white p-6 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold">Case Queue</h3>
-            <p className="text-sm text-slate-500">
-              {activeFilters.length > 0
-                ? `Showing ${cases.length} case(s) for ${activeFilters.join(' | ')}.`
-                : `Showing ${cases.length} after-sales case(s).`}
+      <section className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="hidden">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blue-200">After-Sales Management</p>
+            <h1 className="mt-2 text-2xl font-semibold sm:text-3xl lg:text-4xl">Case Queue</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-200 sm:text-base">
+              Manage after-sales cases from completed service tickets. Track maintenance schedules, warranty claims, and follow-up services.
             </p>
           </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap lg:max-w-md lg:justify-end">
+            <button
+              onClick={() => load()}
+              className="inline-flex items-center justify-center rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-surface-50"
+            >
+              <FiRefreshCw className="mr-2" /> Refresh
+            </button>
+            <button
+              onClick={() => setShowCreateForm((current) => !current)}
+              className="inline-flex items-center justify-center rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"
+            >
+              {showCreateForm ? 'Hide Form' : '+ New Case'}
+            </button>
+          </div>
         </div>
-        <div className="space-y-4">
-          {loading ? (
-            <div className="text-slate-600">Loading...</div>
-          ) : cases.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500">
-              No after-sales cases yet.
+      </section>
+
+      {message && (
+        <div className={`mt-4 rounded-xl border p-4 text-sm ${
+          message.includes('Unable')
+            ? 'border-red-200 bg-red-50 text-red-800'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+        }`}>
+          {message}
+        </div>
+      )}
+
+      {/* Stats Cards */}
+      <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[13px] font-medium text-slate-500">Total Cases</p>
+              <p className="mt-2 text-3xl font-bold text-slate-900">{cases.length}</p>
             </div>
-          ) : (
-            cases.map((caseItem) => (
-              <div
-                key={caseItem.id}
-                className={`rounded-2xl border p-4 ${
-                  caseItem.creation_source === 'completion_flow'
-                    ? 'border-amber-200 bg-amber-50/50'
-                    : caseItem.creation_source === 'maintenance_alert'
-                      ? 'border-emerald-200 bg-emerald-50/40'
-                      : 'border-slate-200'
-                }`}
+            <FiClock className="text-4xl text-slate-300" />
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[13px] font-medium text-slate-500">Open Work</p>
+              <p className="mt-2 text-3xl font-bold text-amber-600">{openCases.length}</p>
+            </div>
+            <FiAlertCircle className="text-4xl text-amber-200" />
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[13px] font-medium text-slate-500">In Progress</p>
+              <p className="mt-2 text-3xl font-bold text-blue-600">{inProgressCases.length}</p>
+            </div>
+            <FiClock className="text-4xl text-blue-200" />
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[13px] font-medium text-slate-500">Resolved</p>
+              <p className="mt-2 text-3xl font-bold text-emerald-600">{resolvedCases.length}</p>
+            </div>
+            <FiCheckCircle className="text-4xl text-emerald-200" />
+          </div>
+        </div>
+      </section>
+
+      {/* Create Form */}
+      {showCreateForm && (
+        <section className="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-slate-900">New Manual Case</h3>
+            <p className="mt-1 text-sm text-slate-500">Use this for exceptions after a ticket is already completed.</p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Completed Ticket</label>
+              <select
+                value={form.service_ticket}
+                onChange={(event) => setForm({ ...form, service_ticket: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="font-semibold text-slate-900">{caseItem.summary}</div>
-                    <div className="mt-1 text-sm text-slate-500">
-                      Ticket #{caseItem.service_ticket} | {caseItem.client_name} | {caseItem.service_type_name}
+                {completedTickets.length > 0 ? (
+                  completedTickets.map((ticket) => (
+                    <option key={ticket.id} value={ticket.id}>{formatTicketId(ticket.id)} {ticket.client} - {ticket.service}</option>
+                  ))
+                ) : (
+                  <option value="">No completed tickets</option>
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Type</label>
+              <select
+                value={form.case_type}
+                onChange={(event) => setForm({ ...form, case_type: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                {CASE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
+              <select
+                value={form.priority}
+                onChange={(event) => setForm({ ...form, priority: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                {PRIORITY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-sm font-medium text-slate-700">Summary</label>
+              <input
+                value={form.summary}
+                onChange={(event) => setForm({ ...form, summary: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                placeholder="Short case summary"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Due Date</label>
+              <input
+                type="date"
+                value={form.due_date}
+                onChange={(event) => setForm({ ...form, due_date: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="md:col-span-2 xl:col-span-3">
+              <label className="mb-1 block text-sm font-medium text-slate-700">Details</label>
+              <textarea
+                value={form.details}
+                onChange={(event) => setForm({ ...form, details: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                rows="3"
+                placeholder="Optional notes for the after-sales agent"
+              />
+            </div>
+          </div>
+          <button
+            onClick={createCase}
+            disabled={!form.service_ticket || !form.summary}
+            className="mt-4 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Create Case
+          </button>
+        </section>
+      )}
+
+      {/* Filters Section */}
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <form onSubmit={applySearch} className="grid gap-3 lg:grid-cols-[1fr_160px_170px_150px_170px_auto]">
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            placeholder="Search cases..."
+          />
+          <select
+            value={statusFilter}
+            onChange={(event) => updateFilter('status', event.target.value)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          >
+            {STATUS_FILTER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <select
+            value={caseTypeFilter}
+            onChange={(event) => updateFilter('case_type', event.target.value)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All Types</option>
+            {CASE_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <select
+            value={priorityFilter}
+            onChange={(event) => updateFilter('priority', event.target.value)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All Priorities</option>
+            {PRIORITY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <select
+            value={sourceFilter}
+            onChange={(event) => updateFilter('source', event.target.value)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          >
+            {SOURCE_FILTER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <div className="flex gap-2">
+            <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
+              Search
+            </button>
+            {hasFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </form>
+      </section>
+
+      {/* Cases Table/Cards Section */}
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-slate-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-slate-900">Cases ({cases.length})</h2>
+            <span className="text-sm text-slate-500">{loading ? 'Loading...' : `${cases.length} shown`}</span>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="px-6 py-12 text-center text-sm text-slate-600">Loading cases...</div>
+        ) : cases.length === 0 ? (
+          <div className="px-6 py-12 text-center text-sm text-slate-500">
+            No cases found. {!hasFilters && 'Complete a ticket with a handoff, wait for a maintenance alert, or create a manual case.'}
+          </div>
+        ) : (
+          <>
+            {/* Mobile Cards View */}
+            <div className="md:hidden">
+              <div className="divide-y divide-slate-200">
+                {cases.map((caseItem) => (
+                  <div key={caseItem.id} className="p-4 hover:bg-slate-50">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Case #{caseItem.id}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${TYPE_CHIP_CLASSES[caseItem.case_type] || TYPE_CHIP_CLASSES.follow_up}`}>
+                            {formatCaseType(caseItem.case_type)}
+                          </span>
+                        </div>
+                        <div className="mt-1 font-semibold text-slate-950">{getCaseTitle(caseItem)}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {formatTicketId(caseItem.ticket_id)} / {caseItem.service_type_name || 'Service'}
+                        </div>
+                      </div>
+                      <StatusBadge status={caseItem.status} size="sm" />
+                    </div>
+                    <div className="mb-3 grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="text-xs text-slate-500">Client</span>
+                        <div className="font-medium text-slate-800">{caseItem.client_full_name || caseItem.client_name || 'Client'}</div>
+                        <div className="truncate text-xs text-slate-500">{getContactLine(caseItem)}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-500">Technician</span>
+                        <div className="font-medium text-slate-800">{caseItem.technician_full_name || 'Unassigned'}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-500">Source</span>
+                        <div className="font-medium text-slate-700">{getSourceLabel(caseItem)}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-500">Due</span>
+                        <div className="font-medium text-slate-700">{formatDate(caseItem.due_date)}</div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {caseItem.status === 'open' && (
+                        <button
+                          onClick={() => updateStatus(caseItem, 'in_progress')}
+                          className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                          Start
+                        </button>
+                      )}
+                      {caseItem.status !== 'resolved' && caseItem.status !== 'closed' && (
+                        <button
+                          onClick={() => updateStatus(caseItem, 'resolved')}
+                          className="rounded-lg bg-emerald-500 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-600"
+                        >
+                          Resolve
+                        </button>
+                      )}
+                      {caseItem.status !== 'closed' && (
+                        <button
+                          onClick={() => updateStatus(caseItem, 'closed')}
+                          className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                          Close
+                        </button>
+                      )}
+                      {(caseItem.status === 'resolved' || caseItem.status === 'closed') && (
+                        <button
+                          onClick={() => updateStatus(caseItem, 'open')}
+                          className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                          Reopen
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${CREATION_SOURCE_TONES[caseItem.creation_source] || 'bg-slate-200 text-slate-700'}`}>
-                      {caseItem.creation_source_label || CREATION_SOURCE_LABELS[caseItem.creation_source] || 'Manual'}
-                    </span>
-                    <StatusBadge status={caseItem.status} size="sm" />
-                  </div>
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-500">
-                  <span>{formatCaseType(caseItem.case_type)}</span>
-                  <span>Priority: {caseItem.priority}</span>
-                  <span>Due: {formatDate(caseItem.due_date)}</span>
-                  <span>{caseItem.requires_revisit ? 'Revisit required' : 'No revisit required'}</span>
-                  {caseItem.created_by_name && <span>Raised by: {caseItem.created_by_name}</span>}
-                </div>
-
-                {renderClientDetails(caseItem)}
-                {caseItem.details && <div className="mt-3 text-sm text-slate-600">{caseItem.details}</div>}
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {caseItem.status === 'open' && (
-                    <button
-                      onClick={() => updateStatus(caseItem, 'in_progress')}
-                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      Start Work
-                    </button>
-                  )}
-                  {caseItem.status !== 'resolved' && caseItem.status !== 'closed' && (
-                    <button
-                      onClick={() => updateStatus(caseItem, 'resolved')}
-                      className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600"
-                    >
-                      Resolve
-                    </button>
-                  )}
-                  {caseItem.status !== 'closed' && (
-                    <button
-                      onClick={() => updateStatus(caseItem, 'closed')}
-                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      Close
-                    </button>
-                  )}
-                  {(caseItem.status === 'resolved' || caseItem.status === 'closed') && (
-                    <button
-                      onClick={() => updateStatus(caseItem, 'open')}
-                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      Reopen
-                    </button>
-                  )}
-                </div>
+                ))}
               </div>
-            ))
-          )}
-        </div>
-      </div>
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="min-w-full table-fixed">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="w-[34%] px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Case</th>
+                    <th className="w-[22%] px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Client</th>
+                    <th className="w-[16%] px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Technician</th>
+                    <th className="w-[16%] px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Case State</th>
+                    <th className="w-[12%] px-5 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {cases.map((caseItem, idx) => (
+                    <tr key={caseItem.id} className={`transition hover:bg-sky-50/40 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
+                      <td className="px-5 py-4 align-top">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <span className="mt-0.5 rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">#{caseItem.id}</span>
+                          <div className="min-w-0">
+                            <div className="line-clamp-2 font-semibold leading-5 text-slate-950">{getCaseTitle(caseItem)}</div>
+                            <div className="mt-1 truncate text-xs text-slate-500">
+                              {formatTicketId(caseItem.ticket_id)} / {caseItem.service_type_name || 'Service'}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <div className="truncate font-medium text-slate-900">
+                          {caseItem.client_full_name || caseItem.client_name || 'Client'}
+                        </div>
+                        <div className="mt-1 truncate text-xs text-slate-500">{getContactLine(caseItem)}</div>
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        {caseItem.technician_full_name ? (
+                          <div className="truncate font-medium text-slate-900">{caseItem.technician_full_name}</div>
+                        ) : (
+                          <div className="text-sm text-slate-400">Unassigned</div>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${TYPE_CHIP_CLASSES[caseItem.case_type] || TYPE_CHIP_CLASSES.follow_up}`}>
+                            {formatCaseType(caseItem.case_type)}
+                          </span>
+                          <StatusBadge status={caseItem.status} size="sm" />
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                          <span className={`rounded-full px-2 py-0.5 font-medium ring-1 ${SOURCE_CHIP_CLASSES[caseItem.creation_source] || SOURCE_CHIP_CLASSES.manual}`}>
+                            {getSourceLabel(caseItem)}
+                          </span>
+                          <span className="text-slate-500">{formatDate(caseItem.due_date)}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {caseItem.status === 'open' && (
+                            <button
+                              onClick={() => updateStatus(caseItem, 'in_progress')}
+                              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                            >
+                              Start
+                            </button>
+                          )}
+                          {caseItem.status !== 'resolved' && caseItem.status !== 'closed' && (
+                            <button
+                              onClick={() => updateStatus(caseItem, 'resolved')}
+                              className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
+                            >
+                              Resolve
+                            </button>
+                          )}
+                          {caseItem.status !== 'closed' && (
+                            <button
+                              onClick={() => updateStatus(caseItem, 'closed')}
+                              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                            >
+                              Close
+                            </button>
+                          )}
+                          {(caseItem.status === 'resolved' || caseItem.status === 'closed') && (
+                            <button
+                              onClick={() => updateStatus(caseItem, 'open')}
+                              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                            >
+                              Reopen
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
     </Layout>
   );
 }

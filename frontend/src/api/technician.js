@@ -10,6 +10,27 @@ const toNumber = (value, fallback = null) => {
   return Number.isFinite(numericValue) ? numericValue : fallback;
 };
 
+const normalizeInventoryReservation = (reservation) => ({
+  ...reservation,
+  itemName: reservation?.item_name || reservation?.itemName || 'Equipment',
+  itemSku: reservation?.item_sku || reservation?.itemSku || '',
+  quantity: toNumericId(reservation?.quantity, 0),
+  status: reservation?.status || 'pending',
+  requiredDate: reservation?.required_date || reservation?.requiredDate || null,
+  technicianName: reservation?.technician_name || reservation?.technicianName || ''
+});
+
+const normalizeInventoryItem = (item) => ({
+  ...item,
+  id: toNumericId(item?.id),
+  name: item?.name || 'Equipment',
+  sku: item?.sku || '',
+  availableQuantity: toNumericId(item?.available_quantity ?? item?.availableQuantity, 0),
+  quantity: toNumericId(item?.quantity, 0),
+  reservedQuantity: toNumericId(item?.reserved_quantity ?? item?.reservedQuantity, 0),
+  status: item?.status || 'available'
+});
+
 const normalizeTechnicianJob = (job) => ({
   ...job,
   crewMembers: Array.isArray(job?.crew_members)
@@ -28,8 +49,30 @@ const normalizeTechnicianJob = (job) => ({
   latitude: toNumber(job.latitude),
   longitude: toNumber(job.longitude),
   status: String(job.status || '').toLowerCase().replace(/\s+/g, '_'),
+  requestSource: job.request_source || job.requestSource || 'client_portal',
+  requestSourceLabel: job.request_source_label || job.requestSourceLabel || 'Client Portal',
   assignmentRole: job.assignment_role || job.assignmentRole || 'lead',
   leadTechnician: job.lead_technician || job.technician || '',
+  inventoryReservations: Array.isArray(job?.inventory_reservations)
+    ? job.inventory_reservations.map(normalizeInventoryReservation)
+    : [],
+  checklistCompleted: Boolean(job?.checklist_completed ?? job?.checklistCompleted),
+  checklistCompletedAt: job?.checklist_completed_at || job?.checklistCompletedAt || null,
+  completionProofImages: Array.isArray(job?.completion_proof_images)
+    ? job.completion_proof_images
+    : (Array.isArray(job?.completionProofImages) ? job.completionProofImages : []),
+  completionNotes: job?.completion_notes || job?.completionNotes || '',
+  inspection: job?.inspection || null,
+  maintenanceSchedule: job?.maintenance_schedule || job?.maintenanceSchedule || null,
+  afterSalesCases: Array.isArray(job?.after_sales_cases)
+    ? job.after_sales_cases
+    : (Array.isArray(job?.afterSalesCases) ? job.afterSalesCases : []),
+  warrantyStatus: job?.warranty_status || job?.warrantyStatus || 'not_applicable',
+  warrantyStartDate: job?.warranty_start_date || job?.warrantyStartDate || null,
+  warrantyEndDate: job?.warranty_end_date || job?.warrantyEndDate || null,
+  warrantyNotes: job?.warranty_notes || job?.warrantyNotes || '',
+  clientRating: job?.client_rating ?? job?.clientRating ?? null,
+  clientFeedback: job?.client_feedback || job?.clientFeedback || '',
   crewSummary: Array.isArray(job?.crew_members)
     ? job.crew_members.map((member) => member?.name || member?.username || 'Technician').join(', ')
     : ''
@@ -51,6 +94,38 @@ export const fetchTechnicianJob = async (ticketId) => {
     return normalizeTechnicianJob(data);
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to load technician job details.'));
+  }
+};
+
+export const fetchTechnicianInventoryItems = async () => {
+  try {
+    const { data } = await api.get('/inventory/items/');
+    const itemArray = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
+    return itemArray.map(normalizeInventoryItem);
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load inventory equipment.'));
+  }
+};
+
+export const requestAdditionalEquipment = async (jobId, { itemId, quantity, items, notes = '' }) => {
+  try {
+    const payload = { notes };
+    if (Array.isArray(items)) {
+      payload.items = items.map((item) => ({
+        item_id: item.itemId ?? item.item_id ?? item.id,
+        quantity: item.quantity
+      }));
+    } else {
+      payload.item_id = itemId;
+      payload.quantity = quantity;
+    }
+
+    const { data } = await api.post(`/services/service-tickets/${jobId}/request_parts/`, {
+      ...payload
+    });
+    return data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to request additional equipment.'));
   }
 };
 
@@ -102,16 +177,18 @@ export const fetchTechnicianHistory = async (techName) => {
   }
 };
 
-export const updateJobStatus = async (jobId, status, notes = '', images = []) => {
+export const updateJobStatus = async (jobId, status, notes = '', images = [], inventoryUsage = null) => {
   try {
     const payload = { status };
-    
-    // If completing job, include proof images and notes
+
     if (status === 'completed') {
       payload.completion_notes = notes;
       payload.completion_proof_images = images;
+      if (inventoryUsage) {
+        payload.inventory_usage = inventoryUsage;
+      }
     }
-    
+
     const { data } = await api.post(`/technician/jobs/${jobId}/status/`, payload);
     return data;
   } catch (error) {

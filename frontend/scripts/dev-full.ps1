@@ -23,10 +23,24 @@ if (Test-Path $backendErrLog) {
   Remove-Item -LiteralPath $backendErrLog -Force
 }
 
+$backendPort = $env:BACKEND_PORT
+if (-not $backendPort) {
+  $backendPort = '8001'
+}
+
+$frontendPort = $env:VITE_DEV_SERVER_PORT
+if (-not $frontendPort) {
+  $frontendPort = '5174'
+}
+
+$env:FRONTEND_BASE_URL = "http://localhost:$frontendPort"
+$env:VITE_BACKEND_HOST = "http://127.0.0.1:$backendPort"
+$env:VITE_DEV_SERVER_PORT = $frontendPort
+
 Write-Host "Starting Django backend with project virtualenv..."
 $backendProcess = Start-Process `
   -FilePath $backendPython `
-  -ArgumentList @($backendManage, 'runserver') `
+  -ArgumentList @($backendManage, 'runserver', "127.0.0.1:$backendPort") `
   -WorkingDirectory $backendDir `
   -RedirectStandardOutput $backendOutLog `
   -RedirectStandardError $backendErrLog `
@@ -40,9 +54,9 @@ if ($backendProcess.HasExited) {
   throw "Backend exited before the frontend started.`n`nSTDOUT:`n$stdout`nSTDERR:`n$stderr"
 }
 
-Write-Host "Backend running on http://127.0.0.1:8000"
+Write-Host "Backend running on http://127.0.0.1:$backendPort"
 Write-Host "Backend logs: $backendOutLog"
-Write-Host "Starting Vite frontend..."
+Write-Host "Starting Vite frontend on http://localhost:$frontendPort..."
 
 try {
   Push-Location $frontendDir

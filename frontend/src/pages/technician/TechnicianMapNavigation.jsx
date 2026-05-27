@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import Layout from '../../components/Layout';
+import Layout from '../../components/layout/Layout';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -8,7 +8,15 @@ import { FiNavigation, FiRefreshCw, FiFlag, FiChevronRight } from 'react-icons/f
 import { fetchNavigationRoute, fetchTechnicianJob, updateTechnicianLocation } from '../../api/api';
 import { useAuth } from '../../context/AuthContext';
 import { useGPSTracking } from '../../hooks/useGPSTracking';
-import GPSStatusIndicator from '../../components/GPSStatusIndicator';
+import GPSStatusIndicator from '../../components/ui/GPSStatusIndicator';
+import {
+  CALABARZON_BOUNDS,
+  CALABARZON_CENTER,
+  CALABARZON_MIN_ZOOM,
+  MAP_ATTRIBUTION,
+  MAP_TILE_URL
+} from '../../utils/mapRegion';
+import { formatTicketId } from '../../utils/roleIds';
 
 const techIcon = L.divIcon({
   html: '<div class="w-12 h-12 bg-blue-500 rounded-full shadow-lg border-4 border-white flex items-center justify-center text-white font-bold text-sm">You</div>',
@@ -54,7 +62,7 @@ export default function TechnicianMapNavigation() {
     stopWatching
   } = useGPSTracking({ autoStart: false });
 
-  const techLoc = gpsLocation ? [gpsLocation.latitude, gpsLocation.longitude] : [14.5995, 120.9842];
+  const techLoc = gpsLocation ? [gpsLocation.latitude, gpsLocation.longitude] : CALABARZON_CENTER;
   const hasJobCoordinates =
     job?.latitude != null &&
     job?.longitude != null &&
@@ -198,7 +206,7 @@ export default function TechnicianMapNavigation() {
         ...route.routeCoords,
         jobLoc
       ];
-      
+
       const bounds = L.latLngBounds(allCoords);
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
     } catch (fitError) {
@@ -255,10 +263,10 @@ export default function TechnicianMapNavigation() {
       <div className="mb-8">
         <h2 className="mb-2 flex items-center gap-3 text-2xl font-semibold text-slate-800">
           <FiNavigation className="text-blue-500" size={28} />
-          Navigation to Ticket #{ticketId}
+          Navigation to {formatTicketId(ticketId)}
         </h2>
         <p className="text-slate-600">
-          {job ? `${job.service} for ${job.client} | ${job.address || 'Location pending'}` : 'Loading job details...'}
+          {job ? `${job.service} for ${job.client?.full_name || job.client} | ${job.address || 'Location pending'}` : 'Loading job details...'}
         </p>
         <p className="mt-1 text-sm text-slate-500">Live GPS tracking enabled | {route.directions.length} turns</p>
         <GPSStatusIndicator status={gpsPermission} accuracy={gpsLocation?.accuracy} className="mt-2" />
@@ -291,14 +299,15 @@ export default function TechnicianMapNavigation() {
             <MapContainer
               key={mapKey}
               center={jobLoc || techLoc}
-              zoom={7}
-              minZoom={6}
+              zoom={CALABARZON_MIN_ZOOM}
+              minZoom={CALABARZON_MIN_ZOOM}
               maxZoom={18}
-              maxBounds={[[4.6, 116.9], [20.9, 126.6]]}
+              maxBounds={CALABARZON_BOUNDS}
+              maxBoundsViscosity={1.0}
               className="h-[70vh]"
               whenReady={(event) => fitBounds(event.target)}
             >
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <TileLayer url={MAP_TILE_URL} attribution={MAP_ATTRIBUTION} />
 
               <Marker position={techLoc} icon={techIcon}>
                 <Popup>

@@ -15,7 +15,8 @@ export const CAPABILITIES = {
   technicianHistoryView: 'technician.history.view',
   technicianProfileView: 'technician.profile.view',
   manageStaffCapabilities: 'users.capabilities.manage_staff',
-  userDirectoryView: 'users.directory.view'
+  userDirectoryView: 'users.directory.view',
+  adminJobHistoryView: 'admin.job_history.view'
 };
 
 export const AFTER_SALES_DASHBOARD_CAPABILITIES = [
@@ -54,6 +55,10 @@ export const SUPERVISOR_USER_ACCESS_CAPABILITIES = [
 
 export const USER_DIRECTORY_CAPABILITIES = [
   CAPABILITIES.userDirectoryView
+];
+
+export const ADMIN_JOB_HISTORY_CAPABILITIES = [
+  CAPABILITIES.adminJobHistoryView
 ];
 
 export const TECHNICIAN_DASHBOARD_CAPABILITIES = [
@@ -100,8 +105,8 @@ export const TECHNICIAN_ACCESS_CAPABILITIES = [
 ];
 
 export const ADMIN_WORKSPACE_ROLES = ['superadmin', 'admin'];
-export const ADMIN_SCOPED_ROLES = [...ADMIN_WORKSPACE_ROLES, 'follow_up'];
-export const DELEGATED_AUTHORITY_ROLES = ['technician', 'follow_up'];
+export const ADMIN_SCOPED_ROLES = [...ADMIN_WORKSPACE_ROLES];
+export const DELEGATED_AUTHORITY_ROLES = ['technician'];
 
 const getRoleValue = (roleOrUser) =>
   (typeof roleOrUser === 'string' ? roleOrUser : roleOrUser?.role) || '';
@@ -115,11 +120,11 @@ export const hasAnyCapability = (user, capabilities = []) =>
 export const hasRoleCapability = (user, role, capabilities = []) =>
   user?.role === role && hasAnyCapability(user, capabilities);
 
-export const canAccessAfterSalesWorkspace = (user) =>
-  hasRoleCapability(user, 'follow_up', AFTER_SALES_NAV_CAPABILITIES);
+export const canAccessAfterSalesFeatures = (user) =>
+  (user?.role === 'superadmin' || user?.role === 'admin') && hasAnyCapability(user, AFTER_SALES_NAV_CAPABILITIES);
 
-export const canAccessSupervisorWorkspace = (user) =>
-  hasRoleCapability(user, 'supervisor', [
+export const canAccessSupervisorFeatures = (user) =>
+  (user?.role === 'superadmin' || user?.role === 'admin') && hasAnyCapability(user, [
     ...SUPERVISOR_DASHBOARD_CAPABILITIES,
     ...SUPERVISOR_TICKETS_CAPABILITIES,
     ...SUPERVISOR_DISPATCH_CAPABILITIES,

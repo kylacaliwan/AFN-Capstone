@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import Layout from '../../components/Layout';
+import Layout from '../../components/layout/Layout';
 import { useAuth } from '../../context/AuthContext';
 import {
+  api,
   createAdminClient,
   createAdminTechnician,
   createAdminUser,
   deactivateAdminUser,
   deleteAdminClient,
   deleteAdminTechnician,
+  fetchAdminTechnician,
   fetchAdminUsers,
   fetchAssignableCapabilities,
   fetchUserCapabilities,
@@ -18,6 +20,7 @@ import {
   updateUserCapabilities
 } from '../../api/api';
 import {
+  CAPABILITIES,
   TECHNICIAN_ACCESS_CAPABILITIES,
   USER_DIRECTORY_CAPABILITIES,
   canReceiveDelegatedAuthority,
@@ -25,24 +28,116 @@ import {
   canManageStaffTargetRole,
   hasAnyCapability
 } from '../../rbac';
+import { formatRoleId } from '../../utils/roleIds';
 
 const ROLE_SECTIONS = [
   { value: 'superadmin', label: 'Superadmin' },
   { value: 'admin', label: 'Administrators' },
-  { value: 'supervisor', label: 'Supervisors' },
   { value: 'technician', label: 'Technicians' },
-  { value: 'follow_up', label: 'After Sales' },
   { value: 'client', label: 'Clients' }
 ];
 const CREATE_ROLE_SECTIONS = ROLE_SECTIONS.filter((section) => section.value !== 'superadmin');
 const TECH_CAP_SET = new Set(TECHNICIAN_ACCESS_CAPABILITIES);
+const ACCESS_AREA_DEFINITIONS = [
+  {
+    roles: ['admin', 'superadmin'],
+    label: 'Dashboard',
+    capabilities: [CAPABILITIES.supervisorDashboardView, CAPABILITIES.afterSalesDashboardView]
+  },
+  {
+    roles: ['admin', 'superadmin'],
+    label: 'Tickets',
+    capabilities: [CAPABILITIES.supervisorTicketsView]
+  },
+  {
+    roles: ['admin', 'superadmin'],
+    label: 'Dispatch',
+    capabilities: [CAPABILITIES.supervisorDispatchView]
+  },
+  {
+    roles: ['admin', 'superadmin'],
+    label: 'Tracking',
+    capabilities: [CAPABILITIES.supervisorTrackingView]
+  },
+  {
+    roles: ['admin', 'superadmin'],
+    label: 'After Sales',
+    capabilities: [
+      CAPABILITIES.afterSalesDashboardView,
+      CAPABILITIES.afterSalesCasesView,
+      CAPABILITIES.afterSalesCasesManage
+    ]
+  },
+  {
+    roles: ['admin', 'superadmin'],
+    label: 'Job History',
+    capabilities: [CAPABILITIES.adminJobHistoryView]
+  },
+  {
+    roles: ['admin', 'superadmin'],
+    label: 'User Directory',
+    capabilities: [CAPABILITIES.userDirectoryView]
+  },
+  {
+    roles: ['admin', 'superadmin'],
+    label: 'Access Control',
+    capabilities: [CAPABILITIES.manageStaffCapabilities]
+  },
+  {
+    roles: ['technician'],
+    label: 'Dashboard',
+    capabilities: [CAPABILITIES.technicianDashboardView]
+  },
+  {
+    roles: ['technician'],
+    label: 'Jobs',
+    capabilities: [CAPABILITIES.technicianJobsView]
+  },
+  {
+    roles: ['technician'],
+    label: 'Schedule',
+    capabilities: [CAPABILITIES.technicianScheduleView]
+  },
+  {
+    roles: ['technician'],
+    label: 'Navigation',
+    capabilities: [CAPABILITIES.technicianNavigationView]
+  },
+  {
+    roles: ['technician'],
+    label: 'Checklist',
+    capabilities: [CAPABILITIES.technicianChecklistView]
+  },
+  {
+    roles: ['technician'],
+    label: 'Messages',
+    capabilities: [CAPABILITIES.technicianMessagesView]
+  },
+  {
+    roles: ['technician'],
+    label: 'History',
+    capabilities: [CAPABILITIES.technicianHistoryView]
+  },
+  {
+    roles: ['technician'],
+    label: 'Profile',
+    capabilities: [CAPABILITIES.technicianProfileView]
+  }
+];
 const inputClass = 'rounded-xl border p-2';
 const panelClass = 'rounded-2xl bg-white p-6 shadow-sm';
 const emptyCreate = { username: '', name: '', role: 'technician', email: '', phone: '', address: '', status: 'available', password: '', passwordConfirm: '' };
-const emptyEdit = { name: '', email: '', phone: '', address: '', status: 'available', lat: '', lng: '' };
+const emptyEdit = { name: '', email: '', phone: '', address: '', status: 'available', lat: '', lng: '', skills: [] };
+const emptySkillEntry = { service_type: '', skill_level: 'intermediate' };
+const SKILL_LEVEL_OPTIONS = [
+  { value: 'beginner', label: 'Beginner' },
+  { value: 'intermediate', label: 'Intermediate' },
+  { value: 'expert', label: 'Expert' }
+];
 
 const getRoleLabel = (role) => ROLE_SECTIONS.find((section) => section.value === role)?.label || role || 'Unknown';
-const getEntityLabel = (role) => (role === 'technician' ? 'Technician' : role === 'client' ? 'Client' : 'User');
+const getEntityLabel = (role) => (role === 'technician' ? 'Technician' : role === 'client' ? 'Client' : role === 'admin' ? 'Administrator' : 'User');
+const isHardDeleteRole = (role) => ['technician', 'client'].includes(role);
 const getAllowedRoleFilter = (canViewAllUsers, search) => {
   const requested = new URLSearchParams(search).get('role');
   const allowed = canViewAllUsers ? ['all', ...ROLE_SECTIONS.map((section) => section.value)] : ['technician'];
@@ -72,6 +167,20 @@ const getDetails = (user) => {
   if (user.role === 'client') return user.address || 'No address on file';
   return user.active ? 'Active account' : 'Inactive account';
 };
+const getAccessAreas = (record) => {
+  if (record.role === 'superadmin') return ['All areas'];
+  const capabilitySet = new Set(record.capabilities || []);
+  return ACCESS_AREA_DEFINITIONS
+    .filter((area) => area.roles.includes(record.role) && area.capabilities.some((capability) => capabilitySet.has(capability)))
+    .map((area) => area.label);
+};
+const groupCapabilitiesByCategory = (capabilities = []) => capabilities.reduce((groups, capability) => {
+  const category = capability.category || 'General';
+  return {
+    ...groups,
+    [category]: [...(groups[category] || []), capability]
+  };
+}, {});
 
 export default function AdminUserManagement() {
   const location = useLocation();
@@ -82,16 +191,20 @@ export default function AdminUserManagement() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState([]);
+  const [availableServiceTypes, setAvailableServiceTypes] = useState([]);
   const [createForm, setCreateForm] = useState(emptyCreate);
   const [editForm, setEditForm] = useState(emptyEdit);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState(() => getAllowedRoleFilter(canViewAllUsers, location.search));
+  const [showInactive, setShowInactive] = useState(false);
   const [editingProfileUser, setEditingProfileUser] = useState(null);
   const [editingAccessUser, setEditingAccessUser] = useState(null);
+  const [viewingAccessUser, setViewingAccessUser] = useState(null);
   const [editingCapabilities, setEditingCapabilities] = useState([]);
   const [busyUserId, setBusyUserId] = useState(null);
+  const [loadingProfileUserId, setLoadingProfileUserId] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isSavingAccess, setIsSavingAccess] = useState(false);
@@ -118,6 +231,19 @@ export default function AdminUserManagement() {
   useEffect(() => { setRoleFilter(getAllowedRoleFilter(canViewAllUsers, location.search)); }, [canViewAllUsers, location.search]);
   useEffect(() => {
     let isMounted = true;
+    api.get('/services/service-types/').then(({ data }) => {
+      if (!isMounted) return;
+      const serviceTypes = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
+      setAvailableServiceTypes(
+        [...serviceTypes].sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || '')))
+      );
+    }).catch(() => {
+      if (isMounted) setAvailableServiceTypes([]);
+    });
+    return () => { isMounted = false; };
+  }, []);
+  useEffect(() => {
+    let isMounted = true;
     if (!allowCapabilityManagement) {
       setCatalog([]);
       return () => { isMounted = false; };
@@ -130,11 +256,15 @@ export default function AdminUserManagement() {
     return () => { isMounted = false; };
   }, [allowCapabilityManagement]);
 
-  const visibleUsers = (canViewAllUsers ? users : users.filter((record) => canManageStaffTargetRole(record.role)))
+  const filteredByAccess = canViewAllUsers ? users : users.filter((record) => canManageStaffTargetRole(record.role));
+  const activeScopedUsers = filteredByAccess.filter((record) => showInactive || record.active);
+  const inactiveCount = filteredByAccess.filter((record) => !record.active).length;
+  const visibleUsers = activeScopedUsers
     .filter((record) => (roleFilter === 'all' || record.role === roleFilter) && matchesSearch(record, searchTerm.trim().toLowerCase()));
+  const capabilityGroups = groupCapabilitiesByCategory(catalog);
 
   const canManageAccessTarget = (role) => isSuperadmin
-    ? ['admin', 'supervisor', 'follow_up'].includes(role)
+    ? ['admin'].includes(role)
     : false;
 
   const handleCreate = async (event) => {
@@ -161,21 +291,80 @@ export default function AdminUserManagement() {
     }
   };
 
-  const openProfileEditor = (record) => {
-    setEditingProfileUser(record);
-    setEditForm({ name: record.name || '', email: record.email || '', phone: record.phone || '', address: record.address || '', status: record.role === 'technician' ? record.technicianStatus || 'available' : 'available', lat: record.lat || '', lng: record.lng || '' });
+  const openProfileEditor = async (record) => {
     setMessage('');
     setError('');
+    setLoadingProfileUserId(record.id);
+    try {
+      const resolvedRecord = record.role === 'technician'
+        ? await fetchAdminTechnician(record.id)
+        : record;
+      setEditingProfileUser(resolvedRecord);
+      setEditForm({
+        ...emptyEdit,
+        name: resolvedRecord.name || '',
+        email: resolvedRecord.email || '',
+        phone: resolvedRecord.phone || '',
+        address: resolvedRecord.address || '',
+        status: resolvedRecord.role === 'technician' ? resolvedRecord.technicianStatus || 'available' : 'available',
+        lat: resolvedRecord.lat || '',
+        lng: resolvedRecord.lng || '',
+        skills: resolvedRecord.role === 'technician'
+          ? (Array.isArray(resolvedRecord.skillDetails) && resolvedRecord.skillDetails.length > 0
+              ? resolvedRecord.skillDetails.map((skill) => ({
+                  service_type: String(skill.service_type),
+                  skill_level: skill.skill_level || 'intermediate'
+                }))
+              : [])
+          : [],
+      });
+    } catch (loadError) {
+      setEditingProfileUser(null);
+      setEditForm(emptyEdit);
+      setError(loadError.message || 'Unable to load user details.');
+    } finally {
+      setLoadingProfileUserId(null);
+    }
   };
 
   const saveProfile = async () => {
     if (!editingProfileUser || !isSuperadmin) return;
+    const technicianSkills = editingProfileUser.role === 'technician'
+      ? (Array.isArray(editForm.skills) ? editForm.skills : [])
+      : [];
+    if (editingProfileUser.role === 'technician') {
+      const seenServiceTypes = new Set();
+      for (let index = 0; index < technicianSkills.length; index += 1) {
+        const skill = technicianSkills[index];
+        const serviceTypeId = String(skill?.service_type || '').trim();
+        if (!serviceTypeId) {
+          setError(`Select a service type for skill #${index + 1}.`);
+          return;
+        }
+        if (seenServiceTypes.has(serviceTypeId)) {
+          setError('Each service type can only be assigned once per technician.');
+          return;
+        }
+        seenServiceTypes.add(serviceTypeId);
+      }
+    }
     const updates = { name: editForm.name, email: editForm.email, phone: editForm.phone, active: editingProfileUser.active };
     setIsSavingProfile(true);
     setMessage('');
     setError('');
     try {
-      if (editingProfileUser.role === 'technician') await updateAdminTechnician(editingProfileUser.id, { ...updates, status: editForm.status, lat: editForm.lat, lng: editForm.lng });
+      if (editingProfileUser.role === 'technician') {
+        await updateAdminTechnician(editingProfileUser.id, {
+          ...updates,
+          status: editForm.status,
+          lat: editForm.lat,
+          lng: editForm.lng,
+          skills: technicianSkills.map((skill) => ({
+            service_type: Number(skill.service_type),
+            skill_level: skill.skill_level || 'intermediate'
+          }))
+        });
+      }
       else if (editingProfileUser.role === 'client') await updateAdminClient(editingProfileUser.id, { ...updates, address: editForm.address });
       else await updateAdminUser(editingProfileUser.id, updates);
       setEditingProfileUser(null);
@@ -189,10 +378,37 @@ export default function AdminUserManagement() {
     }
   };
 
+  const addSkillRow = () => {
+    setEditForm((current) => ({
+      ...current,
+      skills: [...(Array.isArray(current.skills) ? current.skills : []), { ...emptySkillEntry }]
+    }));
+  };
+
+  const updateSkillRow = (index, field, value) => {
+    setEditForm((current) => ({
+      ...current,
+      skills: (Array.isArray(current.skills) ? current.skills : []).map((skill, skillIndex) => (
+        skillIndex === index
+          ? { ...skill, [field]: value }
+          : skill
+      ))
+    }));
+  };
+
+  const removeSkillRow = (index) => {
+    setEditForm((current) => ({
+      ...current,
+      skills: (Array.isArray(current.skills) ? current.skills : []).filter((_, skillIndex) => skillIndex !== index)
+    }));
+  };
+
   const removeUser = async (record) => {
     if (!isSuperadmin) return;
-    const isDelete = record.role === 'technician' || record.role === 'client';
-    if (!window.confirm(isDelete ? `Delete this ${getEntityLabel(record.role).toLowerCase()}?` : 'Deactivate this user?')) return;
+    if (!record.active) return;
+    const hardDelete = isHardDeleteRole(record.role);
+    const actionLabel = hardDelete ? 'Delete' : 'Deactivate';
+    if (!window.confirm(`${actionLabel} this ${getEntityLabel(record.role).toLowerCase()}?`)) return;
     setBusyUserId(record.id);
     setMessage('');
     setError('');
@@ -205,10 +421,11 @@ export default function AdminUserManagement() {
         setMessage('Client deleted.');
       } else {
         await deactivateAdminUser(record.id);
-        setMessage('User deactivated.');
+        setMessage(`${getEntityLabel(record.role)} deactivated.`);
       }
       if (editingProfileUser?.id === record.id) setEditingProfileUser(null);
       if (editingAccessUser?.id === record.id) setEditingAccessUser(null);
+      if (viewingAccessUser?.id === record.id) setViewingAccessUser(null);
       await load({ preserveFeedback: true });
     } catch (removeError) {
       setError(removeError.message || 'Unable to remove user.');
@@ -219,6 +436,7 @@ export default function AdminUserManagement() {
 
   const openAccessEditor = async (record) => {
     if (!allowCapabilityManagement || !canManageAccessTarget(record.role)) return;
+    setViewingAccessUser(null);
     setBusyUserId(record.id);
     setMessage('');
     setError('');
@@ -295,7 +513,7 @@ export default function AdminUserManagement() {
             <input type="password" className={inputClass} placeholder="Password" value={createForm.password} onChange={(event) => setCreateForm({ ...createForm, password: event.target.value })} />
             <input type="password" className={inputClass} placeholder="Confirm Password" value={createForm.passwordConfirm} onChange={(event) => setCreateForm({ ...createForm, passwordConfirm: event.target.value })} />
           </div>
-          <button type="submit" disabled={isSubmitting} className="mt-3 rounded-xl bg-primary px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60">
+          <button type="submit" disabled={isSubmitting} className="mt-3 rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">
             {isSubmitting ? 'Creating...' : 'Create'}
           </button>
         </form>
@@ -321,18 +539,29 @@ export default function AdminUserManagement() {
             <div>
               <p className="mb-2 text-sm font-semibold text-slate-700">Category</p>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => setRoleFilter('all')} className={`rounded-full px-4 py-2 text-sm font-medium transition ${roleFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>All roles ({users.length})</button>
+                <button type="button" onClick={() => setRoleFilter('all')} className={`rounded-full px-4 py-2 text-sm font-medium transition ${roleFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>All roles ({activeScopedUsers.length})</button>
                 {ROLE_SECTIONS.map((section) => {
-                  const count = users.filter((record) => record.role === section.value).length;
+                  const count = activeScopedUsers.filter((record) => record.role === section.value).length;
                   return <button key={section.value} type="button" onClick={() => setRoleFilter(section.value)} className={`rounded-full px-4 py-2 text-sm font-medium transition ${roleFilter === section.value ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}>{section.label} ({count})</button>;
                 })}
               </div>
+              {isSuperadmin && inactiveCount > 0 ? (
+                <label className="mt-3 flex w-fit cursor-pointer items-center gap-2 text-sm font-medium text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={showInactive}
+                    onChange={(event) => setShowInactive(event.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Show inactive accounts ({inactiveCount})
+                </label>
+              ) : null}
             </div>
           ) : (
-            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">Technician accounts available: <span className="font-semibold text-slate-900">{users.filter((record) => record.role === 'technician').length}</span></div>
+            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">Technician accounts available: <span className="font-semibold text-slate-900">{activeScopedUsers.filter((record) => record.role === 'technician').length}</span></div>
           )}
         </div>
-        <p className="mt-4 text-sm text-slate-500">Showing {visibleUsers.length} user{visibleUsers.length === 1 ? '' : 's'}{roleFilter === 'all' ? ' across all roles.' : ` in ${getRoleLabel(roleFilter)}.`}</p>
+        <p className="mt-4 text-sm text-slate-500">Showing {visibleUsers.length} {showInactive ? 'active or inactive' : 'active'} user{visibleUsers.length === 1 ? '' : 's'}{roleFilter === 'all' ? ' across all roles.' : ` in ${getRoleLabel(roleFilter)}.`}</p>
       </div>
 
       {loading ? (
@@ -345,6 +574,7 @@ export default function AdminUserManagement() {
             <table className="min-w-full">
               <thead className="bg-slate-100 text-left text-sm text-slate-700">
                 <tr>
+                  <th className="p-3">User ID</th>
                   <th className="p-3">Username</th>
                   <th className="p-3">Role</th>
                   <th className="p-3">Details</th>
@@ -358,12 +588,14 @@ export default function AdminUserManagement() {
               <tbody>
                 {visibleUsers.map((record) => {
                   const canEditAccess = allowCapabilityManagement && canManageAccessTarget(record.role);
-                  const canDelete = isSuperadmin && record.role !== 'superadmin' && (record.role === 'technician' || record.role === 'client');
-                  const accessCount = record.role === 'technician'
-                    ? (record.capabilities || []).filter((capability) => TECH_CAP_SET.has(capability)).length
-                    : (record.capabilities || []).filter((capability) => capability === USER_DIRECTORY_CAPABILITIES[0]).length;
+                  const hardDelete = isHardDeleteRole(record.role);
+                  const canRemove = isSuperadmin && record.id !== user?.id && record.active;
+                  const removeLabel = hardDelete ? 'Delete' : 'Deactivate';
+                  const busyRemoveLabel = hardDelete ? 'Deleting...' : 'Deactivating...';
+                  const accessAreas = getAccessAreas(record);
                   return (
                     <tr key={record.id} className="border-t">
+                      <td className="p-3 font-semibold text-blue-700">{formatRoleId(record.role, record.id)}</td>
                       <td className="p-3 font-medium text-slate-900">{record.username}</td>
                       <td className="p-3 text-slate-600">{getRoleLabel(record.role)}</td>
                       <td className="p-3 text-sm text-slate-600">{getDetails(record)}</td>
@@ -371,25 +603,36 @@ export default function AdminUserManagement() {
                       <td className="p-3 text-slate-600">{record.phone || '-'}</td>
                       <td className="p-3">
                         {canEditAccess ? (
-                          <div className="space-y-1">
-                            <button type="button" disabled={busyUserId === record.id} onClick={() => openAccessEditor(record)} className="rounded-full border border-slate-200 px-3 py-1 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                          <div className="flex flex-wrap gap-2">
+                            <button type="button" onClick={() => setViewingAccessUser(record)} className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-100">
+                              Areas ({accessAreas.length})
+                            </button>
+                            <button type="button" disabled={busyUserId === record.id} onClick={() => openAccessEditor(record)} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
                               {busyUserId === record.id && editingAccessUser?.id !== record.id ? 'Loading access...' : 'Manage access'}
                             </button>
-                            <div className="text-xs text-slate-500">{accessCount === 0 ? 'Role only' : `${accessCount} granted permission${accessCount === 1 ? '' : 's'}`}</div>
                           </div>
-                        ) : <span className="text-sm text-slate-400">{canViewAllUsers ? 'Read only' : 'Technician only'}</span>}
+                        ) : (
+                          <button type="button" onClick={() => setViewingAccessUser(record)} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50">
+                            {accessAreas.length === 0 ? (canViewAllUsers ? 'Read only' : 'Technician only') : `Areas (${accessAreas.length})`}
+                          </button>
+                        )}
                       </td>
                       <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${record.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}`}>{record.active ? 'Active' : 'Inactive'}</span></td>
                       {isSuperadmin ? (
                         <td className="p-3 text-right">
                           <div className="flex flex-wrap justify-end gap-3">
-                            <button type="button" onClick={() => openProfileEditor(record)} className="text-sm font-medium text-blue-600">Edit</button>
-                            {canDelete ? (
-                              <button type="button" disabled={busyUserId === record.id} onClick={() => removeUser(record)} className="text-sm font-medium text-red-600 disabled:cursor-not-allowed disabled:opacity-60">{busyUserId === record.id ? 'Deleting...' : 'Delete'}</button>
+                            <button
+                              type="button"
+                              disabled={loadingProfileUserId === record.id}
+                              onClick={() => openProfileEditor(record)}
+                              className="text-sm font-medium text-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {loadingProfileUserId === record.id ? 'Loading...' : 'Edit'}
+                            </button>
+                            {canRemove ? (
+                              <button type="button" disabled={busyUserId === record.id} onClick={() => removeUser(record)} className="text-sm font-medium text-red-600 disabled:cursor-not-allowed disabled:opacity-60">{busyUserId === record.id ? busyRemoveLabel : removeLabel}</button>
                             ) : record.role === 'superadmin' ? (
                               <span className="text-sm text-slate-400">Owner account</span>
-                            ) : record.active ? (
-                              <button type="button" disabled={busyUserId === record.id} onClick={() => removeUser(record)} className="text-sm font-medium text-red-600 disabled:cursor-not-allowed disabled:opacity-60">{busyUserId === record.id ? 'Deactivating...' : 'Deactivate'}</button>
                             ) : <span className="text-sm text-slate-400">Inactive</span>}
                           </div>
                         </td>
@@ -402,6 +645,30 @@ export default function AdminUserManagement() {
           </div>
         </div>
       )}
+      {viewingAccessUser ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6 backdrop-blur-sm" onClick={() => setViewingAccessUser(null)}>
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Accessible areas</h3>
+                <p className="text-sm text-slate-500">{viewingAccessUser.username} can access these areas.</p>
+              </div>
+              <button type="button" onClick={() => setViewingAccessUser(null)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">Close</button>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {getAccessAreas(viewingAccessUser).length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 sm:col-span-2">No granted areas.</div>
+              ) : (
+                getAccessAreas(viewingAccessUser).map((area) => (
+                  <div key={area} className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+                    {area}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
       {editingProfileUser ? (
         <div className={`${panelClass} mt-6`}>
           <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
@@ -434,6 +701,43 @@ export default function AdminUserManagement() {
               </>
             ) : null}
           </div>
+          {editingProfileUser.role === 'technician' ? (
+            <div className="mt-6 rounded-2xl border border-slate-200 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-900">Technician skills</h4>
+                  <p className="text-sm text-slate-500">Only the superadmin can change these skills here. Old tickets stay untouched because this updates the technician&apos;s current skill records only.</p>
+                </div>
+                <button type="button" onClick={addSkillRow} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+                  Add skill
+                </button>
+              </div>
+              {editForm.skills.length === 0 ? (
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500">No skills assigned yet.</div>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {editForm.skills.map((skill, index) => (
+                    <div key={`${skill.service_type || 'new'}-${index}`} className="grid gap-3 md:grid-cols-[1.6fr_1fr_auto]">
+                      <select className={inputClass} value={skill.service_type} onChange={(event) => updateSkillRow(index, 'service_type', event.target.value)}>
+                        <option value="">Select service type</option>
+                        {availableServiceTypes.map((serviceType) => (
+                          <option key={serviceType.id} value={serviceType.id}>{serviceType.name}</option>
+                        ))}
+                      </select>
+                      <select className={inputClass} value={skill.skill_level} onChange={(event) => updateSkillRow(index, 'skill_level', event.target.value)}>
+                        {SKILL_LEVEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <button type="button" onClick={() => removeSkillRow(index)} className="rounded-xl border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50">
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
           <button type="button" onClick={saveProfile} disabled={isSavingProfile} className="mt-4 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
             {isSavingProfile ? 'Saving...' : 'Save changes'}
           </button>
@@ -441,31 +745,47 @@ export default function AdminUserManagement() {
       ) : null}
 
       {editingAccessUser ? (
-        <div className={`${panelClass} mt-6`}>
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h3 className="text-lg font-semibold">Capabilities for {getRoleLabel(editingAccessUser.role)}</h3>
-              <p className="text-sm text-slate-500">Select which capabilities {editingAccessUser.username} can access.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6 backdrop-blur-sm" onClick={() => { setEditingAccessUser(null); setEditingCapabilities([]); }}>
+          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Capabilities for {getRoleLabel(editingAccessUser.role)}</h3>
+                <p className="text-sm text-slate-500">Select which capabilities {editingAccessUser.username} can access.</p>
+              </div>
+              <button type="button" onClick={() => { setEditingAccessUser(null); setEditingCapabilities([]); }} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">Close</button>
             </div>
-            <button type="button" onClick={() => { setEditingAccessUser(null); setEditingCapabilities([]); }} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">Close</button>
+            <div className="space-y-5">
+              {Object.entries(capabilityGroups).map(([category, capabilities]) => (
+                <section key={category}>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-blue-600">{category}</h4>
+                    <span className="text-xs font-medium text-slate-500">
+                      {capabilities.filter((capability) => editingCapabilities.includes(capability.code)).length}/{capabilities.length} selected
+                    </span>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {capabilities.map((capability) => (
+                      <label key={capability.code} className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-sm transition ${editingCapabilities.includes(capability.code) ? 'border-slate-900 bg-slate-900/5 text-slate-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                        <input type="checkbox" checked={editingCapabilities.includes(capability.code)} onChange={() => setEditingCapabilities((current) => current.includes(capability.code) ? current.filter((item) => item !== capability.code) : [...current, capability.code])} className="mt-1" />
+                        <span>
+                          <span className="block font-semibold text-slate-900">{capability.label}</span>
+                          <span className="mt-1 block text-xs leading-5 text-slate-500">{capability.description}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+            {catalog.length === 0 ? (
+              <div className="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500">No capabilities are available for this account.</div>
+            ) : null}
+            <div className="sticky bottom-0 mt-5 flex justify-end border-t border-slate-200 bg-white pt-4">
+              <button type="button" onClick={saveAccess} disabled={isSavingAccess} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
+                {isSavingAccess ? 'Saving access...' : 'Save access'}
+              </button>
+            </div>
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {catalog.map((capability) => (
-              <label key={capability.code} className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-sm transition ${editingCapabilities.includes(capability.code) ? 'border-slate-900 bg-slate-900/5 text-slate-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
-                <input type="checkbox" checked={editingCapabilities.includes(capability.code)} onChange={() => setEditingCapabilities((current) => current.includes(capability.code) ? current.filter((item) => item !== capability.code) : [...current, capability.code])} className="mt-1" />
-                <span>
-                  <span className="block font-semibold text-slate-900">{capability.label}</span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500">{capability.description}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          {catalog.length === 0 ? (
-            <div className="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500">No capabilities are available for this account.</div>
-          ) : null}
-          <button type="button" onClick={saveAccess} disabled={isSavingAccess} className="mt-4 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
-            {isSavingAccess ? 'Saving access...' : 'Save access'}
-          </button>
         </div>
       ) : null}
     </Layout>

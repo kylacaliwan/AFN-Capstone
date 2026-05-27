@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Layout from '../../components/Layout';
-import { FiMapPin, FiCalendar, FiUser, FiStar, FiDownload, FiEye } from 'react-icons/fi';
-import { fetchClientRequests } from '../../api/api';
+import Layout from '../../components/layout/Layout';
+import { FiCalendar, FiEye, FiImage, FiMapPin, FiMessageSquare, FiShield, FiStar, FiTool, FiUser } from 'react-icons/fi';
+import TicketTimelineModal from '../../components/shared/TicketTimelineModal';
+import { fetchClientRequests, fetchTicketTimeline } from '../../api/api';
+import { clientTechnicianDisplayOrDash } from '../../utils/clientTechnicianDisplay';
 
 export default function ClientServiceHistory() {
   const [history, setHistory] = useState([]);
@@ -11,6 +13,10 @@ export default function ClientServiceHistory() {
   const [error, setError] = useState(null);
   const [filterType, setFilterType] = useState('all'); // all, completed, rated, pending_rating
   const [sortBy, setSortBy] = useState('recent'); // recent, oldest, highest_rating
+  const [timelineService, setTimelineService] = useState(null);
+  const [timelineEvents, setTimelineEvents] = useState([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -30,8 +36,7 @@ export default function ClientServiceHistory() {
       setHistory(completedServices);
       setError(null);
     } catch (err) {
-      setError('Failed to load service history');
-      console.error(err);
+      setError(err.message || 'Failed to load service history');
       setHistory([]);
     } finally {
       setLoading(false);
@@ -88,12 +93,39 @@ export default function ClientServiceHistory() {
     );
   };
 
+  const formatStatusLabel = (value) =>
+    String(value || '')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+
+  const getProofCount = (service) =>
+    (service.completion_proof_images?.length || 0) + (service.proof_media?.length || 0);
+
+  const openTimeline = async (service) => {
+    if (!service.ticket_id) {
+      return;
+    }
+
+    setTimelineService(service);
+    setTimelineEvents([]);
+    setTimelineError('');
+    setTimelineLoading(true);
+    try {
+      const events = await fetchTicketTimeline(service.ticket_id);
+      setTimelineEvents(events);
+    } catch (loadError) {
+      setTimelineError(loadError.message || 'Unable to load ticket timeline.');
+    } finally {
+      setTimelineLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <Layout>
         <div className="flex items-center justify-center py-12">
           <div className="text-center">
-            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-primary"></div>
+            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-brand-500"></div>
             <p className="mt-4 text-slate-600">Loading service history...</p>
           </div>
         </div>
@@ -124,7 +156,7 @@ export default function ClientServiceHistory() {
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
             >
               <option value="all">All Services</option>
               <option value="rated">Rated Services</option>
@@ -138,7 +170,7 @@ export default function ClientServiceHistory() {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
             >
               <option value="recent">Most Recent</option>
               <option value="oldest">Oldest First</option>
@@ -197,7 +229,7 @@ export default function ClientServiceHistory() {
                       <p className="text-xs text-slate-500 uppercase tracking-wide">Technician</p>
                       <div className="flex items-center gap-2 mt-1">
                         <FiUser size={16} className="text-slate-400" />
-                        <p className="font-medium text-slate-900">{service.technician_name}</p>
+                        <p className="font-medium text-slate-900">{clientTechnicianDisplayOrDash(service)}</p>
                       </div>
                     </div>
                     <div>
@@ -216,18 +248,27 @@ export default function ClientServiceHistory() {
                       <div>{renderRating(service.client_rating)}</div>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => navigate(`/client/requests/${service.id}?entity=request`)}
-                        className="flex-1 flex items-center justify-center gap-1 rounded-lg bg-slate-100 hover:bg-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition"
+                        className="min-w-24 flex-1 flex items-center justify-center gap-1 rounded-lg bg-slate-100 hover:bg-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition"
                       >
                         <FiEye size={14} />
                         View
                       </button>
+                      {service.ticket_id && (
+                        <button
+                          onClick={() => openTimeline(service)}
+                          className="min-w-24 flex-1 flex items-center justify-center gap-1 rounded-lg bg-slate-100 hover:bg-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition"
+                        >
+                          <FiMessageSquare size={14} />
+                          Timeline
+                        </button>
+                      )}
                       {!service.client_rating && (
                         <button
                           onClick={() => navigate(`/client/requests/${service.id}?entity=request`)}
-                          className="flex-1 flex items-center justify-center gap-1 rounded-lg bg-primary hover:bg-primary/90 px-3 py-2 text-sm font-medium text-white transition"
+                          className="min-w-24 flex-1 flex items-center justify-center gap-1 rounded-lg bg-brand-500 hover:bg-brand-600 px-3 py-2 text-sm font-medium text-white transition"
                         >
                           <FiStar size={14} />
                           Rate
@@ -244,11 +285,71 @@ export default function ClientServiceHistory() {
                     <p className="mt-1 text-sm text-slate-700 italic">"{service.client_feedback}"</p>
                   </div>
                 )}
+
+                <div className="mt-3 grid gap-2 border-t border-slate-100 pt-3 text-sm md:grid-cols-3">
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <FiImage size={14} /> Proof
+                    </div>
+                    <p className="font-medium text-slate-900">
+                      {getProofCount(service) > 0 ? `${getProofCount(service)} file(s)` : 'No proof files'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <FiShield size={14} /> Warranty
+                    </div>
+                    <p className="font-medium text-slate-900">
+                      {formatStatusLabel(service.warranty_status || 'not_applicable')}
+                    </p>
+                    {service.warranty_end_date && (
+                      <p className="text-xs text-slate-500">Ends {formatDate(service.warranty_end_date)}</p>
+                    )}
+                  </div>
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <FiTool size={14} /> Maintenance
+                    </div>
+                    <p className="font-medium text-slate-900">
+                      {service.maintenance_schedule?.next_due_date
+                        ? formatDate(service.maintenance_schedule.next_due_date)
+                        : 'Not scheduled'}
+                    </p>
+                  </div>
+                </div>
+
+                {(service.completion_notes || service.after_sales_cases?.length > 0) && (
+                  <div className="mt-3 grid gap-3 border-t border-slate-100 pt-3 md:grid-cols-2">
+                    {service.completion_notes && (
+                      <div>
+                        <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          <FiMessageSquare size={13} /> Completion Notes
+                        </p>
+                        <p className="mt-1 line-clamp-2 text-sm text-slate-700">{service.completion_notes}</p>
+                      </div>
+                    )}
+                    {service.after_sales_cases?.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">After-Sales</p>
+                        <p className="mt-1 text-sm font-medium text-slate-900">
+                          {service.after_sales_cases.length} follow-up case(s)
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
       </div>
+      <TicketTimelineModal
+        ticket={timelineService}
+        events={timelineEvents}
+        loading={timelineLoading}
+        error={timelineError}
+        onClose={() => setTimelineService(null)}
+      />
     </Layout>
   );
 }

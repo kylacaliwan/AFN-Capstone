@@ -37,14 +37,14 @@ export const formatSlaSummary = (sla) => {
   const normalizedState = normalizeSlaState(sla?.state);
 
   if (normalizedState === 'overdue' && Number.isFinite(sla?.minutesOverdue) && sla.minutesOverdue > 0) {
-    return `${sla.label} · ${sla.minutesOverdue}m overdue`;
+    return `${sla.label} - ${sla.minutesOverdue}m overdue`;
   }
 
   if (
     (normalizedState === 'healthy' || normalizedState === 'warning') &&
     Number.isFinite(sla?.minutesToBreach)
   ) {
-    return `${sla.label} · ${sla.minutesToBreach}m to breach`;
+    return `${sla.label} - ${sla.minutesToBreach}m to breach`;
   }
 
   return sla?.label || SLA_META.inactive.label;

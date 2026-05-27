@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import Layout from '../../components/Layout';
+import Layout from '../../components/layout/Layout';
 import { api } from '../../api/api';
 import { FiAlertCircle, FiEdit3, FiPlus, FiRefreshCw, FiTrash2 } from 'react-icons/fi';
 
@@ -38,6 +38,15 @@ const normalizeInventoryItem = (item) => ({
   available_quantity: Number(item?.available_quantity ?? item?.quantity ?? 0),
   is_low_stock: Boolean(item?.is_low_stock)
 });
+
+const parseIntegerInput = (value, fallback = 0) => {
+  if (value === '') {
+    return '';
+  }
+
+  const parsedValue = parseInt(value, 10);
+  return Number.isNaN(parsedValue) ? fallback : parsedValue;
+};
 
 const statusColor = (status) => {
   switch (status) {
@@ -146,7 +155,7 @@ export default function AdminInventory() {
     sku: item.sku,
     category: Number(item.category),
     quantity: Number(item.quantity || 0),
-    minimum_stock: Number(item.minimum_stock || 0),
+    minimum_stock: Number(item.minimum_stock === '' ? 0 : item.minimum_stock),
     status: item.status
   });
 
@@ -199,23 +208,21 @@ export default function AdminInventory() {
       item.status,
     ].some((value) => String(value || '').toLowerCase().includes(normalizedSearchTerm));
   });
-  const lowStockItems = inventory.filter(
-    (item) => item.is_low_stock || item.available_quantity <= item.minimum_stock
-  );
+  const lowStockItems = inventory.filter((item) => item.is_low_stock);
   const categoryMissing = categories.length === 0;
 
   return (
     <Layout>
-      <div className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+      <div className="card mb-4 flex flex-col gap-4 p-5 xl:flex-row xl:items-end xl:justify-between">
         <div className="flex-1">
-          <h2 className="text-3xl font-bold text-slate-900">Inventory Management</h2>
-          <p className="mt-2 text-slate-600">Track stock levels, item categories, and replenishment risk.</p>
+          <h2 className="text-lg font-semibold text-slate-900">Inventory Management</h2>
+          <p className="mt-1 text-sm text-slate-500">Track stock levels, item categories, and replenishment risk.</p>
           <div className="mt-4 max-w-xl">
             <label className="mb-2 block text-sm font-semibold text-slate-700">Search inventory</label>
             <input
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
               placeholder="Search by item name, SKU, category, or status"
             />
           </div>
@@ -236,7 +243,7 @@ export default function AdminInventory() {
               setAdding(true);
             }}
             disabled={categoryMissing}
-            className="rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white shadow-lg transition hover:bg-emerald-600 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-xl bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <FiPlus size={18} className="ml-1 inline" /> Add Item
           </button>
@@ -260,7 +267,7 @@ export default function AdminInventory() {
       )}
 
       {(adding || editingId) && (
-        <div className="mb-8 rounded-3xl border bg-white p-8 shadow-xl">
+        <div className="card mb-4 p-5 sm:p-6">
           <h3 className="mb-6 text-xl font-bold">{adding ? 'Add New Item' : 'Edit Item'}</h3>
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-6">
             <div>
@@ -272,7 +279,7 @@ export default function AdminInventory() {
                     ? setNewItem({ ...newItem, name: e.target.value })
                     : setEditingItem({ ...editingItem, name: e.target.value })
                 }
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
                 placeholder="Solar Panel 345W"
               />
             </div>
@@ -285,7 +292,7 @@ export default function AdminInventory() {
                     ? setNewItem({ ...newItem, sku: e.target.value })
                     : setEditingItem({ ...editingItem, sku: e.target.value })
                 }
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
                 placeholder="SP345"
               />
             </div>
@@ -298,7 +305,7 @@ export default function AdminInventory() {
                     ? setNewItem({ ...newItem, category: Number(e.target.value) || '' })
                     : setEditingItem({ ...editingItem, category: Number(e.target.value) || '' })
                 }
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
               >
                 {categories.map((category) => (
                   <option key={category.id} value={category.id}>
@@ -311,13 +318,14 @@ export default function AdminInventory() {
               <label className="mb-2 block text-sm font-semibold text-slate-900">Quantity</label>
               <input
                 type="number"
-                value={adding ? newItem.quantity : editingItem.quantity || 0}
+                min="0"
+                value={adding ? newItem.quantity : editingItem.quantity}
                 onChange={(e) =>
                   adding
-                    ? setNewItem({ ...newItem, quantity: parseInt(e.target.value, 10) || 0 })
-                    : setEditingItem({ ...editingItem, quantity: parseInt(e.target.value, 10) || 0 })
+                    ? setNewItem({ ...newItem, quantity: parseIntegerInput(e.target.value) })
+                    : setEditingItem({ ...editingItem, quantity: parseIntegerInput(e.target.value) })
                 }
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
               />
             </div>
             <div>
@@ -329,7 +337,7 @@ export default function AdminInventory() {
                     ? setNewItem({ ...newItem, status: e.target.value })
                     : setEditingItem({ ...editingItem, status: e.target.value })
                 }
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
               >
                 {STATUS_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -342,26 +350,27 @@ export default function AdminInventory() {
               <label className="mb-2 block text-sm font-semibold text-slate-900">Min Stock</label>
               <input
                 type="number"
-                value={adding ? newItem.minimum_stock : editingItem.minimum_stock || 10}
+                min="0"
+                value={adding ? newItem.minimum_stock : editingItem.minimum_stock}
                 onChange={(e) =>
                   adding
-                    ? setNewItem({ ...newItem, minimum_stock: parseInt(e.target.value, 10) || 10 })
-                    : setEditingItem({ ...editingItem, minimum_stock: parseInt(e.target.value, 10) || 10 })
+                    ? setNewItem({ ...newItem, minimum_stock: parseIntegerInput(e.target.value) })
+                    : setEditingItem({ ...editingItem, minimum_stock: parseIntegerInput(e.target.value) })
                 }
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
               />
             </div>
           </div>
-          <div className="mt-8 flex gap-4">
+          <div className="mt-6 flex gap-3">
             <button
               onClick={adding ? addItem : () => updateItem(editingId)}
-              className="flex-1 rounded-2xl bg-emerald-500 px-8 py-4 font-semibold text-white shadow-lg transition-all hover:bg-emerald-600"
+              className="flex-1 rounded-xl bg-brand-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-brand-600"
             >
               {adding ? 'Add Item' : 'Update Item'}
             </button>
             <button
               onClick={() => resetEditor()}
-              className="flex-1 rounded-2xl border border-slate-300 bg-white px-8 py-4 font-semibold transition hover:border-slate-400"
+              className="flex-1 rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
               Cancel
             </button>
@@ -369,9 +378,9 @@ export default function AdminInventory() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-3xl border bg-white shadow-xl">
-        <div className="border-b border-slate-200 p-8">
-          <h3 className="text-2xl font-bold text-slate-900">
+      <div className="card overflow-hidden">
+        <div className="border-b border-slate-200 p-5">
+          <h3 className="text-lg font-semibold text-slate-900">
             Stock Overview ({filteredInventory.length}
             {filteredInventory.length !== inventory.length ? ` of ${inventory.length}` : ''} items)
           </h3>
@@ -382,34 +391,34 @@ export default function AdminInventory() {
           </p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full text-sm">
             <thead className="bg-slate-50">
               <tr>
-                <th className="px-8 py-6 text-left text-sm font-semibold uppercase tracking-wide text-slate-900">
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Item
                 </th>
-                <th className="px-6 py-6 text-left text-sm font-semibold uppercase tracking-wide text-slate-900">
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Category
                 </th>
-                <th className="px-6 py-6 text-left text-sm font-semibold uppercase tracking-wide text-slate-900">
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   SKU
                 </th>
-                <th className="px-6 py-6 text-right text-sm font-semibold uppercase tracking-wide text-slate-900">
+                <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Quantity
                 </th>
-                <th className="px-6 py-6 text-right text-sm font-semibold uppercase tracking-wide text-slate-900">
+                <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Available
                 </th>
-                <th className="px-6 py-6 text-center text-sm font-semibold uppercase tracking-wide text-slate-900">
-                  Status
-                </th>
-                <th className="px-6 py-6 text-right text-sm font-semibold uppercase tracking-wide text-slate-900">
+                <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Min Stock
                 </th>
-                <th className="px-6 py-6 text-center text-sm font-semibold uppercase tracking-wide text-slate-900">
+                <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Status
+                </th>
+                <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Last Updated
                 </th>
-                <th className="px-6 py-6 text-right text-sm font-semibold uppercase tracking-wide text-slate-900">
+                <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Actions
                 </th>
               </tr>
@@ -430,14 +439,14 @@ export default function AdminInventory() {
               ) : (
                 filteredInventory.map((item) => (
                   <tr key={item.id} className="transition hover:bg-slate-50">
-                    <td className="px-8 py-6">
+                    <td className="px-6 py-4">
                       <div className="font-semibold text-slate-900">{item.name}</div>
                     </td>
-                    <td className="px-6 py-6 text-sm text-slate-600">{item.category_name}</td>
-                    <td className="px-6 py-6 text-sm text-slate-600">{item.sku || '-'}</td>
-                    <td className="px-6 py-6 text-right">
+                    <td className="px-6 py-4 text-sm text-slate-600">{item.category_name}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600">{item.sku || '-'}</td>
+                    <td className="px-6 py-4 text-right">
                       <span
-                        className={`font-mono text-2xl font-bold ${
+                        className={`font-mono text-xl font-bold ${
                           item.quantity === 0
                             ? 'text-red-600'
                             : item.is_low_stock
@@ -448,17 +457,17 @@ export default function AdminInventory() {
                         {item.quantity}
                       </span>
                     </td>
-                    <td className="px-6 py-6 text-right font-semibold text-slate-900">{item.available_quantity}</td>
-                    <td className="px-6 py-6 text-center">
+                    <td className="px-6 py-4 text-right font-semibold text-slate-900">{item.available_quantity}</td>
+                    <td className="px-6 py-4 text-right font-semibold text-slate-900">{item.minimum_stock}</td>
+                    <td className="px-6 py-4 text-center">
                       <span className={`rounded-full px-4 py-2 text-sm font-semibold ${statusColor(item.status)}`}>
                         {String(item.status || '').replace('_', ' ').toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-6 py-6 text-right font-semibold text-slate-900">{item.minimum_stock}</td>
-                    <td className="px-6 py-6 text-center text-sm text-slate-500">
+                    <td className="px-6 py-4 text-center text-sm text-slate-500">
                       {item.updated_at ? new Date(item.updated_at).toLocaleDateString() : '-'}
                     </td>
-                    <td className="space-x-2 px-6 py-6 text-right">
+                    <td className="space-x-2 px-6 py-4 text-right">
                       <button
                         onClick={() => {
                           setAdding(false);
@@ -487,9 +496,21 @@ export default function AdminInventory() {
       </div>
 
       {lowStockItems.length > 0 && (
-        <div className="mt-8 rounded-3xl bg-gradient-to-r from-yellow-500 to-orange-500 p-8 text-white shadow-2xl">
-          <h4 className="mb-2 text-xl font-bold">Low Stock Alert</h4>
-          <p>{lowStockItems.length} items need replenishment.</p>
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
+          <h4 className="font-semibold">Low Stock Alert</h4>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {lowStockItems.map((item) => (
+              <div key={item.id} className="rounded-lg border border-amber-200 bg-white/70 px-3 py-2 text-sm">
+                <div className="font-semibold text-amber-950">{item.name}</div>
+                <div className="mt-1 text-xs text-amber-800">
+                  Available: <span className="font-semibold">{item.available_quantity}</span>
+                  <span className="mx-1.5 text-amber-400">/</span>
+                  Min: <span className="font-semibold">{item.minimum_stock}</span>
+                  {item.sku ? <span className="ml-2 text-amber-600">SKU {item.sku}</span> : null}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </Layout>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FiEye, FiEyeOff } from 'react-icons/fi';
+import AuthShell from '../components/AuthShell';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
@@ -40,76 +41,93 @@ export default function Login() {
     navigate(storedUser?.role ? '/' : '/');
   };
 
+  const inputClass =
+    'w-full rounded-[7px] border border-[#5f9caf] bg-[#f3f3f3] px-3 py-3 text-[18px] text-slate-800 outline-none transition placeholder:text-[#a7a7a7] focus:border-[#2382bd] focus:bg-white focus:ring-2 focus:ring-[#2f9bff]/15';
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-500 to-cyan-600 px-4 text-white">
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 text-slate-800 shadow-xl">
-        <h1 className="mb-1 text-2xl font-bold">AFN Service Management</h1>
-        <p className="mb-6 text-sm text-slate-500">Sign in with your username or email.</p>
+    <AuthShell backgroundImage="/login-bg.jpg">
+      <div className="animate-fade-in">
+        <img
+          src="/logo.png"
+          alt="AFN Solar Power Engineering Services"
+          className="mx-auto h-auto w-[170px]"
+        />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium">Username or Email</label>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Enter your username or email"
-              autoComplete="username"
-              required
-            />
+        <h1 className="mt-10 text-center font-serif text-[30px] font-bold uppercase text-[#1f7ebc]">
+          Sign In
+        </h1>
+
+        {error && (
+          <div className="mt-6 rounded-[7px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            {error}
           </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="mt-8 space-y-3">
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            className={inputClass}
+            placeholder="Username"
+            aria-label="Username or email"
+            autoComplete="username"
+            required
+          />
 
           <div>
-            <label className="mb-1 block text-sm font-medium">Password</label>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border px-3 py-2 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter your password"
+                className={`${inputClass} pr-12`}
+                placeholder="Password"
+                aria-label="Password"
                 autoComplete="current-password"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((current) => !current)}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 transition hover:text-slate-700"
+                className="absolute inset-y-0 right-0 flex items-center px-4 text-slate-400 transition hover:text-slate-600"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
-                aria-pressed={showPassword}
               >
                 {showPassword ? <FiEyeOff size={18} /> : <FiEye size={18} />}
               </button>
             </div>
             <div className="mt-2 text-right">
-              <Link to="/forgot-password" className="text-sm font-medium text-blue-600 hover:underline">
+              <Link to="/forgot-password" className="font-serif text-[17px] font-bold text-[#1f7ebc] hover:text-[#145985]">
                 Forgot password?
               </Link>
             </div>
           </div>
 
-          {error && (
-            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-              {error}
-            </p>
-          )}
-
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-blue-600 py-2 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-7 flex w-full items-center justify-center rounded-[7px] bg-[#1f7ebc] py-3 font-serif text-[27px] font-bold leading-none text-white shadow-sm transition hover:bg-[#16699f] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? (
+              <span className="flex items-center gap-2 text-[18px]">
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Signing in...
+              </span>
+            ) : (
+              'Sign in'
+            )}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-slate-600">
+        <p className="mt-7 text-center font-serif text-[26px] font-bold text-[#333]">
           Don't have an account?{' '}
-          <Link to="/register" className="font-medium text-blue-600 hover:underline">
-            Sign up
+          <Link to="/register" className="text-[#12357b] hover:text-[#1f7ebc]">
+            Create account
           </Link>
         </p>
       </div>
-    </div>
+    </AuthShell>
   );
 }

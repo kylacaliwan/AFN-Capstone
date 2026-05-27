@@ -7,6 +7,31 @@ import {
   normalizeUser
 } from './core';
 
+const normalizeTechnicianRecord = (tech) => {
+  const skillDetails = Array.isArray(tech?.skill_details)
+    ? tech.skill_details.map((skill) => ({
+        ...skill,
+        service_type: Number(skill?.service_type),
+        skill_level: skill?.skill_level || 'intermediate',
+      }))
+    : [];
+  const skillNames = Array.isArray(tech?.skills)
+    ? tech.skills
+    : skillDetails.map((skill) => skill.service_type_name).filter(Boolean);
+
+  return {
+    ...normalizeUser(tech),
+    status: normalizeTechnicianStatus(tech),
+    skills: skillNames,
+    skill: tech?.skill
+      ? String(tech.skill).toLowerCase().replace(/\s+/g, '_')
+      : (skillNames[0]
+          ? String(skillNames[0]).toLowerCase().replace(/\s+/g, '_')
+          : ''),
+    skillDetails,
+  };
+};
+
 export const fetchAdminUsers = async () => {
   try {
     const { data } = await api.get('/users/');
@@ -122,20 +147,18 @@ export const fetchAdminTechnicians = async () => {
   try {
     const { data } = await api.get('/admin/technicians/');
     const techArray = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
-    return Array.isArray(techArray)
-      ? techArray.map((tech) => ({
-          ...normalizeUser(tech),
-          status: normalizeTechnicianStatus(tech),
-          skills: Array.isArray(tech.skills) ? tech.skills : [],
-          skill: tech.skill
-            ? String(tech.skill).toLowerCase().replace(/\s+/g, '_')
-            : (Array.isArray(tech.skills) && tech.skills.length > 0
-                ? String(tech.skills[0]).toLowerCase().replace(/\s+/g, '_')
-                : '')
-        }))
-      : [];
+    return Array.isArray(techArray) ? techArray.map(normalizeTechnicianRecord) : [];
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to load technicians.'));
+  }
+};
+
+export const fetchAdminTechnician = async (id) => {
+  try {
+    const { data } = await api.get(`/admin/technicians/${id}/`);
+    return normalizeTechnicianRecord(data);
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load technician details.'));
   }
 };
 
@@ -148,7 +171,7 @@ export const createAdminTechnician = async (tech) => {
       is_available: tech.status === 'available'
     };
     const { data } = await api.post('/admin/technicians/', payload);
-    return normalizeUser(data);
+    return normalizeTechnicianRecord(data);
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to create technician.'));
   }
@@ -161,7 +184,7 @@ export const updateAdminTechnician = async (id, updates) => {
       technicianStatus: updates.status
     });
     const { data } = await api.put(`/admin/technicians/${id}/`, payload);
-    return normalizeUser(data);
+    return normalizeTechnicianRecord(data);
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to update technician.'));
   }
@@ -173,6 +196,18 @@ export const deleteAdminTechnician = async (id) => {
     return data;
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to delete technician.'));
+  }
+};
+
+export const fetchAdminCalendarEvents = async ({ start, end } = {}) => {
+  try {
+    const params = {};
+    if (start) params.start = start;
+    if (end) params.end = end;
+    const { data } = await api.get('/admin/calendar/', { params });
+    return Array.isArray(data?.events) ? data.events : [];
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load admin calendar.'));
   }
 };
 
@@ -193,6 +228,21 @@ export const assignTechnician = async ({ ticketId, technicianId, technicianName,
     return data;
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to assign technician.'));
+  }
+};
+
+export const rescheduleServiceTicket = async (ticketId, schedulingData) => {
+  try {
+    const payload = {
+      scheduled_date: schedulingData.scheduledDate,
+      scheduled_time_slot: schedulingData.scheduledTimeSlot || null,
+      scheduled_time: schedulingData.scheduledTime || null,
+      notes: schedulingData.notes || ''
+    };
+    const { data } = await api.post(`/services/service-tickets/${ticketId}/reschedule/`, payload);
+    return data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to reschedule service ticket.'));
   }
 };
 
@@ -223,6 +273,57 @@ export const updateAdminSettings = async (settings) => {
   }
 };
 
+export const fetchSlaRules = async () => {
+  try {
+    const { data } = await api.get('/services/sla-rules/');
+    return Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load SLA rules.'));
+  }
+};
+
+export const updateSlaRule = async (ruleId, updates) => {
+  try {
+    const { data } = await api.patch(`/services/sla-rules/${ruleId}/`, updates);
+    return data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to update SLA rule.'));
+  }
+};
+
+export const fetchActivityLogs = async (filters = {}) => {
+  try {
+    const params = {};
+    if (filters.search) params.search = filters.search;
+    if (filters.action) params.action = filters.action;
+    if (filters.model) params.model = filters.model;
+    if (filters.changedBy) params.changed_by = filters.changedBy;
+    if (filters.dateFrom) params.date_from = filters.dateFrom;
+    if (filters.dateTo) params.date_to = filters.dateTo;
+
+    const { data } = await api.get('/admin/activity-logs/', { params });
+    const rows = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
+    return rows.map((log) => ({
+      id: log.id,
+      appLabel: log.app_label,
+      model: log.model,
+      objectId: log.object_id,
+      objectLabel: log.object_label,
+      action: log.action,
+      fieldName: log.field_name,
+      oldValue: log.old_value,
+      newValue: log.new_value,
+      changedBy: log.changed_by,
+      changedByName: log.changed_by_name || 'System',
+      changedByRole: log.changed_by_role,
+      changedAt: log.changed_at,
+      summary: log.summary
+    }));
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load activity logs.'));
+  }
+};
+
 export const fetchServices = async () => {
   try {
     const { data } = await api.get('/admin/services/');
@@ -241,9 +342,28 @@ export const fetchServices = async () => {
 export const createService = async (service) => {
   try {
     const payload = {
-      name: service.name,
-      description: service.description,
-      estimated_duration: Number(service.estimated_duration || 0)
+      name: String(service.name || '').trim(),
+      description: String(service.description || '').trim(),
+      estimated_duration: Number(service.estimated_duration || 0),
+      estimated_cost: Number(service.estimated_cost || 0),
+      max_daily_assignments: Number(service.max_daily_assignments || 1),
+      procedures: Array.isArray(service.procedures)
+        ? service.procedures
+            .map((procedure, index) => ({
+              step: index + 1,
+              title: String(procedure?.title || '').trim(),
+              description: String(procedure?.description || '').trim()
+            }))
+            .filter((procedure) => procedure.title)
+        : [],
+      required_equipment: Array.isArray(service.required_equipment)
+        ? service.required_equipment
+            .map((item) => ({
+              name: String(item?.name || '').trim(),
+              quantity: Number(item?.quantity || 1)
+            }))
+            .filter((item) => item.name)
+        : []
     };
     const { data } = await api.post('/admin/services/', payload);
     return {
@@ -258,9 +378,28 @@ export const createService = async (service) => {
 export const updateService = async (id, updates) => {
   try {
     const payload = {
-      name: updates.name,
-      description: updates.description,
-      estimated_duration: Number(updates.estimated_duration || 0)
+      name: String(updates.name || '').trim(),
+      description: String(updates.description || '').trim(),
+      estimated_duration: Number(updates.estimated_duration || 0),
+      estimated_cost: Number(updates.estimated_cost || 0),
+      max_daily_assignments: Number(updates.max_daily_assignments || 1),
+      procedures: Array.isArray(updates.procedures)
+        ? updates.procedures
+            .map((procedure, index) => ({
+              step: index + 1,
+              title: String(procedure?.title || '').trim(),
+              description: String(procedure?.description || '').trim()
+            }))
+            .filter((procedure) => procedure.title)
+        : [],
+      required_equipment: Array.isArray(updates.required_equipment)
+        ? updates.required_equipment
+            .map((item) => ({
+              name: String(item?.name || '').trim(),
+              quantity: Number(item?.quantity || 1)
+            }))
+            .filter((item) => item.name)
+        : []
     };
     const { data } = await api.put(`/admin/services/${id}/`, payload);
     return {
@@ -281,9 +420,11 @@ export const deleteService = async (id) => {
   }
 };
 
-export const fetchAdminAnalytics = async () => {
+export const fetchAdminAnalytics = async (days = 30) => {
   try {
-    const { data } = await api.get('/admin/analytics/');
+    const { data } = await api.get('/admin/analytics/', {
+      params: { days: Math.max(7, Math.min(365, days)) }
+    });
     return data;
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to load admin analytics.'));

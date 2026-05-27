@@ -1,4 +1,5 @@
 import { api, getApiErrorMessage } from './core';
+import { clientTechnicianDisplayString } from '../utils/clientTechnicianDisplay';
 
 const extractList = (data) => (Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []));
 
@@ -45,6 +46,9 @@ const formatWorkflowLabel = (hasTicket) => (hasTicket ? 'Ticket Active' : 'Reque
 
 const normalizeServiceRequest = (request) => {
   const requestStatus = normalizeStatus(request.status);
+  const serviceItems = Array.isArray(request.service_items) ? request.service_items : [];
+  const serviceNames = serviceItems.map((item) => item?.service_type_name).filter(Boolean);
+  const serviceName = request.service_summary || serviceNames.join(', ') || request.service_type_name;
 
   return {
     id: request.id,
@@ -53,12 +57,15 @@ const normalizeServiceRequest = (request) => {
     has_ticket: false,
     workflow_stage: 'request',
     workflow_label: formatWorkflowLabel(false),
+    request_source: request.request_source || 'client_portal',
+    request_source_label: request.request_source_label || 'Client Portal',
     status: requestStatus,
     request_status: requestStatus,
     ticket_status: null,
     operational_status: requestStatus,
     service_type: request.service_type,
-    service_type_name: request.service_type_name,
+    service_type_name: serviceName,
+    service_items: serviceItems,
     description: request.description,
     priority: request.priority,
     address: request.location?.address || '',
@@ -89,6 +96,11 @@ const normalizeServiceRequest = (request) => {
     warranty_end_date: null,
     warranty_notes: '',
     proof_media: [],
+    completion_proof_images: [],
+    completion_notes: '',
+    inspection: null,
+    maintenance_schedule: null,
+    after_sales_cases: [],
     progress: buildProgress(requestStatus),
   };
 };
@@ -104,6 +116,8 @@ const mergeRequestWithTicket = (serviceRequest, ticket) => {
     has_ticket: true,
     workflow_stage: 'ticket',
     workflow_label: formatWorkflowLabel(true),
+    request_source: ticket.request_source || serviceRequest.request_source,
+    request_source_label: ticket.request_source_label || serviceRequest.request_source_label,
     status: clientStatus,
     ticket_status: ticketStatus,
     operational_status: ticketStatus,
@@ -114,7 +128,7 @@ const mergeRequestWithTicket = (serviceRequest, ticket) => {
     start_time: ticket.start_time,
     end_time: ticket.end_time,
     completed_date: ticket.completed_date,
-    technician_name: ticket.technician_name || '',
+    technician_name: clientTechnicianDisplayString(ticket),
     technician_contact: ticket.technician_contact || '',
     client_rating: ticket.client_rating,
     client_feedback: ticket.client_feedback,
@@ -126,6 +140,11 @@ const mergeRequestWithTicket = (serviceRequest, ticket) => {
     warranty_end_date: ticket.warranty_end_date,
     warranty_notes: ticket.warranty_notes,
     proof_media: Array.isArray(ticket.inspection?.proof_media) ? ticket.inspection.proof_media : [],
+    completion_proof_images: Array.isArray(ticket.completion_proof_images) ? ticket.completion_proof_images : [],
+    completion_notes: ticket.completion_notes || '',
+    inspection: ticket.inspection || null,
+    maintenance_schedule: ticket.maintenance_schedule || null,
+    after_sales_cases: Array.isArray(ticket.after_sales_cases) ? ticket.after_sales_cases : [],
     updated_at: ticket.updated_at || serviceRequest.updated_at,
     progress: buildProgress(clientStatus),
   };

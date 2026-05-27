@@ -7,9 +7,10 @@
     "dev": "vite",
     "dev:full": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\dev-full.ps1",
     "build": "vite build",
+    "build:pythonanywhere": "vite build --mode pythonanywhere",
     "preview": "vite preview",
     "start": "vite",
-    "start:backend": "..\\backend\\venv\\Scripts\\python.exe ..\\backend\\manage.py runserver",
+    "start:backend": "..\\backend\\venv\\Scripts\\python.exe ..\\backend\\manage.py runserver 127.0.0.1:8000",
     "start:frontend": "vite"
   },
   "dependencies": {
@@ -20,7 +21,8 @@
     "react-dom": "^18.3.1",
     "react-icons": "^4.11.0",
     "react-leaflet": "^4.2.1",
-    "react-router-dom": "^6.18.0"
+    "react-router-dom": "^6.18.0",
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

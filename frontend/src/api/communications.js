@@ -4,6 +4,8 @@ const normalizeMessage = (message) => ({
   ...message,
   text: message.text || message.message_text || '',
   timestamp: message.timestamp || message.created_at,
+  roomType: message.room_type || message.roomType || 'direct',
+  groupKey: message.group_key || message.groupKey || '',
   senderId: message.sender,
   senderName: message.sender_name || String(message.sender || ''),
   senderPhone: message.sender_phone || '',
@@ -28,17 +30,17 @@ export const fetchMessages = async (role, username) => {
 
 export const sendMessage = async (messageData) => {
   try {
+    const roomType = messageData.roomType ?? messageData.room_type ?? 'direct';
     const payload = {
-      receiver: messageData.receiverId ?? messageData.receiver,
-      ticket: messageData.ticketId ?? messageData.ticket,
+      room_type: roomType,
+      group_key: messageData.groupKey ?? messageData.group_key,
+      receiver: roomType === 'group' ? null : (messageData.receiverId ?? messageData.receiver),
+      ticket: messageData.ticketId ?? messageData.ticket ?? null,
       text: messageData.text ?? messageData.message_text,
     };
 
-    if (!payload.receiver) {
+    if (roomType !== 'group' && !payload.receiver) {
       throw new Error('A message receiver is required.');
-    }
-    if (!payload.ticket) {
-      throw new Error('A related ticket is required to send a message.');
     }
     if (!payload.text || !String(payload.text).trim()) {
       throw new Error('Message text is required.');
@@ -51,6 +53,15 @@ export const sendMessage = async (messageData) => {
       throw error;
     }
     throw new Error(getApiErrorMessage(error, 'Unable to send message.'));
+  }
+};
+
+export const fetchMessageParticipants = async () => {
+  try {
+    const { data } = await api.get('/messages/participants/');
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load message participants.'));
   }
 };
 
@@ -69,6 +80,10 @@ export const markNotificationAsRead = async (notificationId) => {
     const { data } = await api.post(`/notifications/${notificationId}/mark_read/`);
     return data;
   } catch (error) {
+    const status = error?.response?.status;
+    if (status === 404 || status === 410) {
+      return { status: 'noop', detail: 'Notification not found.' };
+    }
     throw new Error(getApiErrorMessage(error, 'Unable to mark notification as read.'));
   }
 };

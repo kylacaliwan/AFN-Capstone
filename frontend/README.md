@@ -25,14 +25,16 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Open `http://localhost:5174`.
 
-Run the Django API separately from the repository root:
+Run the Django API on **port 8000** (this must match `vite.config.js`; otherwise `/api` may hit a different project):
 
 ```bash
 cd backend
-python manage.py runserver
+python manage.py runserver 127.0.0.1:8000
 ```
+
+Or start both together from `frontend`: `npm run dev:full` (PowerShell). That script can still use a custom backend port through `BACKEND_PORT` because it passes `VITE_BACKEND_HOST` automatically.
 
 ## Authentication
 - Use real accounts created through the Django backend.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import Layout from '../../components/Layout';
+import Layout from '../../components/layout/Layout';
 import { FiAlertCircle, FiBell, FiCheckCircle, FiInfo, FiTrash2 } from 'react-icons/fi';
 import { api } from '../../api/api';
 

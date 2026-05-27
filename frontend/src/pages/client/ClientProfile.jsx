@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { API_BASE_URL } from '../../api/core';
-import Layout from '../../components/Layout';
+import { changePassword, updateUserProfile } from '../../api/client';
+import Layout from '../../components/layout/Layout';
 import { FiEdit2, FiSave, FiX, FiMail, FiPhone, FiMapPin, FiUser, FiLock } from 'react-icons/fi';
-import axios from 'axios';
 
 export default function ClientProfile() {
-  const { user, token, logout } = useAuth();
+  const { user, logout } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [profileData, setProfileData] = useState({
     first_name: '',
@@ -23,11 +22,6 @@ export default function ClientProfile() {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
-
-  const api = axios.create({
-    baseURL: API_BASE_URL,
-    headers: token ? { Authorization: `Token ${token}` } : {},
-  });
 
   useEffect(() => {
     if (user) {
@@ -63,18 +57,16 @@ export default function ClientProfile() {
     setMessage({ type: '', text: '' });
 
     try {
-      // Use DRF standard endpoint: /users/{id}/ to update user profile
-      const response = await api.patch('/users/me/', profileData);
+      const updatedProfile = await updateUserProfile(profileData);
       setMessage({ type: 'success', text: 'Profile updated successfully!' });
       setIsEditing(false);
-      // Update localStorage
-      const updatedUser = { ...user, ...profileData };
+      const updatedUser = { ...user, ...updatedProfile };
       localStorage.setItem('afn_user', JSON.stringify(updatedUser));
       setTimeout(() => window.location.reload(), 1500);
     } catch (error) {
       setMessage({
         type: 'error',
-        text: error.response?.data?.error || 'Error updating profile',
+        text: error.message || 'Error updating profile',
       });
     } finally {
       setLoading(false);
@@ -93,11 +85,7 @@ export default function ClientProfile() {
     }
 
     try {
-      // Use DRF standard endpoint for password change
-      await api.post('/users/change_password/', {
-        current_password: passwordData.currentPassword,
-        new_password: passwordData.newPassword,
-      });
+      await changePassword(passwordData);
       setMessage({ type: 'success', text: 'Password changed successfully!' });
       setPasswordData({
         currentPassword: '',
@@ -108,7 +96,7 @@ export default function ClientProfile() {
     } catch (error) {
       setMessage({
         type: 'error',
-        text: error.response?.data?.error || 'Error changing password',
+        text: error.message || 'Error changing password',
       });
     } finally {
       setLoading(false);

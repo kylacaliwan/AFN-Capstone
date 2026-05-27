@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import AuthShell from '../components/AuthShell';
 import { useAuth } from '../context/AuthContext';
 
 export default function Register() {
@@ -7,7 +8,7 @@ export default function Register() {
   const { register } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -22,10 +23,7 @@ export default function Register() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e) => {
@@ -33,7 +31,6 @@ export default function Register() {
     setError('');
     setLoading(true);
 
-    // Basic validation
     if (!formData.username || !formData.email || !formData.password) {
       setError('Username, email, and password are required');
       setLoading(false);
@@ -71,153 +68,151 @@ export default function Register() {
       return;
     }
 
-    // Registration successful; public signup creates a client account and signs in immediately.
     navigate('/client/dashboard', { replace: true });
   };
 
+  const inputClass =
+    'w-full rounded-[7px] border border-[#5f9caf] bg-[#f3f3f3] px-3 py-3 text-[18px] text-slate-800 outline-none transition placeholder:text-[#a7a7a7] focus:border-[#2382bd] focus:bg-white focus:ring-2 focus:ring-[#2f9bff]/15';
+
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-blue-500 to-cyan-600 text-white items-center justify-center px-4 py-8">
-      <div className="bg-white text-slate-800 rounded-2xl shadow-xl w-full max-w-md p-8">
-        <h1 className="text-2xl font-bold mb-1">Create Account</h1>
-        <p className="text-sm text-slate-500 mb-6">Create a client account and go straight into the client portal.</p>
+    <AuthShell backgroundImage="/register-bg.jpg">
+      <div className="animate-fade-in">
+        <img
+          src="/logo.png"
+          alt="AFN Solar Power Engineering Services"
+          className="mx-auto h-auto w-[170px]"
+        />
+
+        <h1 className="mt-10 text-center font-serif text-[30px] font-bold uppercase text-[#1f7ebc]">
+          Create Account
+        </h1>
 
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-4">
+          <div className="mt-6 rounded-[7px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Username */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Username *</label>
-            <input
-              type="text"
-              name="username"
-              value={formData.username}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Choose a username"
-              required
-            />
-          </div>
+        <form onSubmit={handleSubmit} className="mt-8 space-y-3">
+          <input
+            type="text"
+            name="username"
+            value={formData.username}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Username"
+            aria-label="Username"
+            autoComplete="username"
+            required
+          />
 
-          {/* Email */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Email *</label>
-            <input
-              type="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Enter your email"
-              required
-            />
-          </div>
+          <input
+            type="text"
+            name="first_name"
+            value={formData.first_name}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Firstname"
+            aria-label="First name"
+            autoComplete="given-name"
+          />
 
-          {/* First Name */}
-          <div>
-            <label className="block text-sm font-medium mb-1">First Name</label>
-            <input
-              type="text"
-              name="first_name"
-              value={formData.first_name}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="(Optional)"
-            />
-          </div>
+          <input
+            type="text"
+            name="last_name"
+            value={formData.last_name}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Lastname"
+            aria-label="Last name"
+            autoComplete="family-name"
+          />
 
-          {/* Last Name */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Last Name</label>
-            <input
-              type="text"
-              name="last_name"
-              value={formData.last_name}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="(Optional)"
-            />
-          </div>
+          <input
+            type="email"
+            name="email"
+            value={formData.email}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Email Address"
+            aria-label="Email address"
+            autoComplete="email"
+            required
+          />
 
-          {/* Phone */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Phone</label>
+          <div className="grid gap-3 sm:grid-cols-2">
             <input
               type="tel"
               name="phone"
               value={formData.phone}
               onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="(Optional)"
+              className={inputClass}
+              placeholder="Phone"
+              aria-label="Phone"
+              autoComplete="tel"
             />
-          </div>
-
-          {/* Address */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Address</label>
             <input
               type="text"
               name="address"
               value={formData.address}
               onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="(Optional)"
+              className={inputClass}
+              placeholder="Address"
+              aria-label="Address"
+              autoComplete="street-address"
             />
           </div>
 
-          <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-            Public signup is for client accounts only.
-          </div>
+          <input
+            type="password"
+            name="password"
+            value={formData.password}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Password"
+            aria-label="Password"
+            autoComplete="new-password"
+            required
+          />
 
-          {/* Password */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Password *</label>
-            <input
-              type="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="At least 6 characters"
-              required
-            />
-          </div>
+          <input
+            type="password"
+            name="password_confirm"
+            value={formData.password_confirm}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Confirm password"
+            aria-label="Confirm password"
+            autoComplete="new-password"
+            required
+          />
 
-          {/* Confirm Password */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Confirm Password *</label>
-            <input
-              type="password"
-              name="password_confirm"
-              value={formData.password_confirm}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Re-enter your password"
-              required
-            />
-          </div>
-
-          {/* Submit Button */}
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 rounded-lg transition-colors"
+            className="mt-7 flex w-full items-center justify-center rounded-[7px] bg-[#1f7ebc] py-3 font-serif text-[27px] font-bold leading-none text-white shadow-sm transition hover:bg-[#16699f] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? 'Creating Account...' : 'Create Account'}
+            {loading ? (
+              <span className="flex items-center gap-2 text-[18px]">
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Creating account...
+              </span>
+            ) : (
+              'Create Account'
+            )}
           </button>
         </form>
 
-        {/* Link to Login */}
-        <p className="text-center text-sm text-slate-600 mt-6">
+        <p className="mt-7 text-center font-serif text-[26px] font-bold text-[#333]">
           Already have an account?{' '}
-          <Link to="/login" className="text-blue-600 font-medium hover:underline">
+          <Link to="/login" className="text-[#12357b] hover:text-[#1f7ebc]">
             Sign in
           </Link>
         </p>
       </div>
-    </div>
+    </AuthShell>
   );
 }

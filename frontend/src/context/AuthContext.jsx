@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { API_BASE_URL, api, clearStoredAuth } from '../api/core';
 import { deregisterFCMToken, getSavedFCMToken, registerFCMToken } from '../services/firebaseService';
@@ -23,6 +23,10 @@ export const AuthProvider = ({ children }) => {
 
   const [token, setToken] = useState(() => localStorage.getItem('afn_token') || null);
 
+  // True while the initial /users/me/ sync is running.
+  // RoleRedirect reads this so it waits before attempting a redirect.
+  const [loading, setLoading] = useState(() => !!localStorage.getItem('afn_token'));
+
   // Keep Axios default header in sync with token state
   useEffect(() => {
     if (token) {
@@ -44,10 +48,12 @@ export const AuthProvider = ({ children }) => {
   // cannot leave the UI thinking one user is logged in while the backend sees another.
   useEffect(() => {
     if (!token) {
+      setLoading(false);
       return;
     }
 
     let isMounted = true;
+    setLoading(true);
 
     const syncAuthenticatedUser = async () => {
       try {
@@ -68,6 +74,10 @@ export const AuthProvider = ({ children }) => {
         clearStoredAuth();
         setToken(null);
         setUser(null);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
@@ -82,7 +92,7 @@ export const AuthProvider = ({ children }) => {
    * Authenticate against the Django backend.
    * Returns { success: true } or { success: false, message: string }
    */
-  const login = async (username, password) => {
+  const login = useCallback(async (username, password) => {
     try {
       clearStoredAuth();
       setToken(null);
@@ -117,9 +127,9 @@ export const AuthProvider = ({ children }) => {
         'Invalid username or password';
       return { success: false, message };
     }
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     const authToken = token;
     const fcmToken = getSavedFCMToken();
 
@@ -143,13 +153,13 @@ export const AuthProvider = ({ children }) => {
     clearStoredAuth();
     setToken(null);
     setUser(null);
-  };
+  }, [token]);
 
   /**
    * Register a new user account.
    * Returns { success: true } or { success: false, message: string }
    */
-  const register = async (userData) => {
+  const register = useCallback(async (userData) => {
     try {
       clearStoredAuth();
       setToken(null);
@@ -193,12 +203,22 @@ export const AuthProvider = ({ children }) => {
 
       return { success: false, message };
     }
-  };
+  }, []);
 
   const isAuthenticated = !!user && !!token;
 
+  const contextValue = useMemo(() => ({
+    user,
+    token,
+    isAuthenticated,
+    loading,
+    login,
+    logout,
+    register
+  }), [user, token, isAuthenticated, loading, login, logout, register]);
+
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated, login, logout, register }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );
@@ -208,7 +228,7 @@ export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === null) {
     // Fallback for cases where hook is called outside provider or during initialization
-    return { user: null, token: null, isAuthenticated: false, login: async () => {}, logout: () => {}, register: async () => {} };
+    return { user: null, token: null, isAuthenticated: false, loading: false, login: async () => {}, logout: () => {}, register: async () => {} };
   }
   return context;
 };

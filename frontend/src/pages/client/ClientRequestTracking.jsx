@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Layout from '../../components/Layout';
-import StatusBadge from '../../components/StatusBadge';
+import Layout from '../../components/layout/Layout';
+import StatusBadge from '../../components/ui/StatusBadge';
 import { FiMapPin, FiCalendar, FiUser, FiArrowRight, FiFilter } from 'react-icons/fi';
 import { fetchClientRequests } from '../../api/api';
+import { clientTechnicianDisplayString } from '../../utils/clientTechnicianDisplay';
+import { formatTicketId } from '../../utils/roleIds';
 
 export default function ClientRequestTracking() {
   const [requests, setRequests] = useState([]);
@@ -56,9 +58,9 @@ export default function ClientRequestTracking() {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'short', 
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
       day: 'numeric'
     });
   };
@@ -74,7 +76,7 @@ export default function ClientRequestTracking() {
           <h2 className="text-2xl font-semibold text-slate-800">My Service Requests</h2>
           <button
             onClick={() => navigate('/client/service-requests')}
-            className="rounded bg-primary px-4 py-2 text-white hover:bg-primary/90 transition"
+            className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600"
           >
             Create New Request
           </button>
@@ -91,7 +93,7 @@ export default function ClientRequestTracking() {
               onClick={() => setStatusFilter('all')}
               className={`px-4 py-2 rounded-full text-sm font-medium transition ${
                 statusFilter === 'all'
-                  ? 'bg-primary text-white'
+                  ? 'bg-brand-500 text-white'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
@@ -144,7 +146,7 @@ export default function ClientRequestTracking() {
         {loading && (
           <div className="rounded-lg bg-white p-8 shadow-sm text-center">
             <div className="inline-block">
-              <div className="h-8 w-8 rounded-full border-4 border-slate-200 border-t-primary animate-spin"></div>
+              <div className="h-8 w-8 rounded-full border-4 border-slate-200 border-t-brand-500 animate-spin"></div>
             </div>
             <p className="mt-2 text-slate-600">Loading requests...</p>
           </div>
@@ -167,13 +169,13 @@ export default function ClientRequestTracking() {
         {!loading && filteredRequests.length === 0 && (
           <div className="rounded-lg bg-white p-8 shadow-sm text-center">
             <p className="text-slate-600 mb-4">
-              {statusFilter === 'all' 
-                ? 'No service requests yet.' 
+              {statusFilter === 'all'
+                ? 'No service requests yet.'
                 : `No ${statusFilter} requests.`}
             </p>
             <button
               onClick={() => navigate('/client/service-requests')}
-              className="text-primary hover:underline font-medium"
+              className="font-medium text-brand-600 hover:underline"
             >
               Create your first request
             </button>
@@ -183,7 +185,9 @@ export default function ClientRequestTracking() {
         {/* Requests Grid */}
         {!loading && filteredRequests.length > 0 && (
           <div className="grid gap-4">
-            {filteredRequests.map((request) => (
+            {filteredRequests.map((request) => {
+              const technicianLabel = clientTechnicianDisplayString(request);
+              return (
               <div
                 key={request.id}
                 className="rounded-lg bg-white p-5 shadow-sm border border-slate-200 hover:shadow-md transition cursor-pointer"
@@ -199,6 +203,9 @@ export default function ClientRequestTracking() {
                       <StatusBadge status={request.status} size="sm" />
                       <span className={`inline-block px-2 py-1 text-xs font-medium whitespace-nowrap ${getPriorityColor(request.priority)}`}>
                         {request.priority?.toUpperCase()}
+                      </span>
+                      <span className="inline-block whitespace-nowrap rounded-full bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700 ring-1 ring-inset ring-sky-200">
+                        {request.request_source_label}
                       </span>
                     </div>
 
@@ -230,13 +237,13 @@ export default function ClientRequestTracking() {
                       </div>
 
                       {/* Technician (if assigned) */}
-                      {request.technician_name && (
+                      {technicianLabel && (
                         <div className="flex items-start gap-2">
                           <FiUser className="text-slate-400 flex-shrink-0 mt-0.5" />
                           <div>
                             <p className="text-slate-500 text-xs">Technician</p>
                             <p className="text-slate-700">
-                              {request.technician_name}
+                              {technicianLabel}
                             </p>
                           </div>
                         </div>
@@ -260,7 +267,7 @@ export default function ClientRequestTracking() {
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-600">
                         {request.ticket_id && (
                           <span className="rounded-full bg-slate-100 px-3 py-1">
-                            Linked ticket #{request.ticket_id}
+                            Linked {formatTicketId(request.ticket_id)}
                           </span>
                         )}
                         {request.operational_status && request.operational_status !== request.status && (
@@ -291,7 +298,8 @@ export default function ClientRequestTracking() {
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

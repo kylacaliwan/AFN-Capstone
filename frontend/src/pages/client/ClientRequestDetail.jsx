@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import Layout from '../../components/Layout';
-import StatusBadge from '../../components/StatusBadge';
-import { FiMapPin, FiCalendar, FiUser, FiArrowLeft, FiStar, FiImage, FiX } from 'react-icons/fi';
-import { api, fetchRequestDetail, requestTicketReschedule, submitRequestRating } from '../../api/api';
+import Layout from '../../components/layout/Layout';
+import StatusBadge from '../../components/ui/StatusBadge';
+import TicketTimelineModal from '../../components/shared/TicketTimelineModal';
+import { FiMapPin, FiCalendar, FiUser, FiArrowLeft, FiStar, FiImage, FiX, FiClock } from 'react-icons/fi';
+import { api, fetchRequestDetail, fetchTicketTimeline, requestTicketReschedule, submitRequestRating } from '../../api/api';
 import { getLocalDateInputValue } from '../../utils/date';
+import { clientTechnicianDisplayString } from '../../utils/clientTechnicianDisplay';
+import { formatTicketId } from '../../utils/roleIds';
 
 const TIME_SLOT_LABELS = {
   morning: 'Morning (8 AM - 11 AM)',
@@ -33,6 +36,11 @@ export default function ClientRequestDetail() {
   const [proofImages, setProofImages] = useState([]);
   const [loadingProofImages, setLoadingProofImages] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [timelineEvents, setTimelineEvents] = useState([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState('');
   const entityType = searchParams.get('entity') || 'request';
 
   useEffect(() => {
@@ -46,7 +54,7 @@ export default function ClientRequestDetail() {
         setSelectedImage(null);
       }
     };
-    
+
     if (selectedImage) {
       window.addEventListener('keydown', handleEscKey);
       return () => window.removeEventListener('keydown', handleEscKey);
@@ -65,14 +73,13 @@ export default function ClientRequestDetail() {
       setRescheduleTimeSlot(data.preferred_time_slot || data.scheduled_time_slot || '');
       setRescheduleReason(data.reschedule_reason || data.scheduling_notes || '');
       setError(null);
-      
+
       // Load proof images if ticket is completed
       if (data.status === 'completed' && data.ticket_id) {
         loadProofImages(data.ticket_id);
       }
     } catch (err) {
-      setError('Failed to load request details');
-      console.error(err);
+      setError(err.message || 'Failed to load request details');
     } finally {
       setLoading(false);
     }
@@ -83,8 +90,7 @@ export default function ClientRequestDetail() {
     try {
       const response = await api.get(`/services/service-tickets/${ticketId}/proof_images/`);
       setProofImages(response.data.completion_proof_images || []);
-    } catch (err) {
-      console.warn('Could not load proof images:', err);
+    } catch {
       setProofImages([]);
     } finally {
       setLoadingProofImages(false);
@@ -92,13 +98,20 @@ export default function ClientRequestDetail() {
   };
 
   const handleRequestReschedule = async () => {
+    setNotice(null);
     if (!request?.ticket_id) {
-      alert('This request is still waiting for a linked service ticket before it can be rescheduled.');
+      setNotice({
+        tone: 'warning',
+        message: 'This request is still waiting for a linked service ticket before it can be rescheduled.'
+      });
       return;
     }
 
     if (!rescheduleDate || !rescheduleTimeSlot || !rescheduleReason.trim()) {
-      alert('Please choose a date, time slot, and reason for the schedule change.');
+      setNotice({
+        tone: 'warning',
+        message: 'Please choose a date, time slot, and reason for the schedule change.'
+      });
       return;
     }
 
@@ -110,23 +123,30 @@ export default function ClientRequestDetail() {
         reason: rescheduleReason.trim()
       });
       setShowRescheduleForm(false);
+      setNotice({ tone: 'success', message: 'Schedule change request sent.' });
       await loadRequest();
     } catch (err) {
-      alert('Failed to request reschedule: ' + err.message);
-      console.error(err);
+      setNotice({
+        tone: 'error',
+        message: `Failed to request reschedule: ${err.message}`
+      });
     } finally {
       setRescheduleSubmitting(false);
     }
   };
 
   const handleSubmitRating = async () => {
+    setNotice(null);
     if (!request?.ticket_id) {
-      alert('Feedback becomes available after a service ticket has been completed.');
+      setNotice({
+        tone: 'warning',
+        message: 'Feedback becomes available after a service ticket has been completed.'
+      });
       return;
     }
 
     if (rating === 0) {
-      alert('Please select a rating');
+      setNotice({ tone: 'warning', message: 'Please select a rating.' });
       return;
     }
 
@@ -138,13 +158,33 @@ export default function ClientRequestDetail() {
       });
       setRatingSubmitted(true);
       setShowRatingForm(false);
+      setNotice({ tone: 'success', message: 'Thank you. Your rating was submitted.' });
       // Reload to show updated data
       await loadRequest();
     } catch (err) {
-      alert('Failed to submit rating: ' + err.message);
-      console.error(err);
+      setNotice({
+        tone: 'error',
+        message: `Failed to submit rating: ${err.message}`
+      });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openTimeline = async () => {
+    if (!request?.ticket_id) return;
+    setTimelineOpen(true);
+    setTimelineEvents([]);
+    setTimelineError('');
+    setTimelineLoading(true);
+
+    try {
+      const events = await fetchTicketTimeline(request.ticket_id);
+      setTimelineEvents(events);
+    } catch (loadError) {
+      setTimelineError(loadError.message || 'Unable to load ticket timeline.');
+    } finally {
+      setTimelineLoading(false);
     }
   };
 
@@ -161,9 +201,9 @@ export default function ClientRequestDetail() {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'long', 
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
@@ -173,7 +213,7 @@ export default function ClientRequestDetail() {
   const formatTime = (dateString) => {
     if (!dateString) return 'TBD';
     const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', { 
+    return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit'
     });
@@ -186,7 +226,7 @@ export default function ClientRequestDetail() {
       <Layout>
         <div className="rounded-lg bg-white p-8 shadow-sm text-center">
           <div className="inline-block">
-            <div className="h-8 w-8 rounded-full border-4 border-slate-200 border-t-primary animate-spin"></div>
+            <div className="h-8 w-8 rounded-full border-4 border-slate-200 border-t-brand-500 animate-spin"></div>
           </div>
           <p className="mt-2 text-slate-600">Loading request details...</p>
         </div>
@@ -212,10 +252,22 @@ export default function ClientRequestDetail() {
 
   const isCompleted = request.status === 'completed';
   const canRequestReschedule = Boolean(request.ticket_id) && request.status !== 'completed' && request.status !== 'cancelled';
+  const technicianLabel = clientTechnicianDisplayString(request);
+  const noticeClassName = {
+    success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    warning: 'border-amber-200 bg-amber-50 text-amber-800',
+    error: 'border-red-200 bg-red-50 text-red-800'
+  }[notice?.tone || 'warning'];
 
   return (
     <Layout>
       <div className="space-y-8 pb-8">
+        {notice && (
+          <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${noticeClassName}`}>
+            {notice.message}
+          </div>
+        )}
+
         {/* Header with improved styling */}
         <div className="flex items-start gap-4 mb-8">
           <button
@@ -231,11 +283,14 @@ export default function ClientRequestDetail() {
                 Service Request #{request.request_id || request.id}
               </h1>
               <StatusBadge status={request.status} size="lg" />
+              <span className="rounded-full bg-sky-50 px-3 py-1 text-sm font-semibold text-sky-700 ring-1 ring-inset ring-sky-200">
+                {request.request_source_label}
+              </span>
             </div>
             <p className="text-slate-600">
               {request.service_type_name || request.service_type}
               {request.ticket_id
-                ? ` • Ticket #${request.ticket_id}`
+                ? ` • ${formatTicketId(request.ticket_id)}`
                 : request.status === 'pending'
                   ? ' • Pending review'
                   : ' • Awaiting dispatch'}
@@ -251,7 +306,7 @@ export default function ClientRequestDetail() {
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={request.status} size="lg" />
                 <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide ${
-                  request.priority?.toLowerCase() === 'urgent' 
+                  request.priority?.toLowerCase() === 'urgent'
                     ? 'bg-red-100 text-red-700'
                     : request.priority?.toLowerCase() === 'high'
                     ? 'bg-orange-100 text-orange-700'
@@ -274,7 +329,7 @@ export default function ClientRequestDetail() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Progress</p>
                 <div className="space-y-2">
                   <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden shadow-inner">
-                    <div 
+                    <div
                       className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-500 rounded-full"
                       style={{ width: `${request.progress}%` }}
                     ></div>
@@ -300,6 +355,10 @@ export default function ClientRequestDetail() {
                 <div>
                   <p className="text-sm text-slate-600 mb-1">Service Type</p>
                   <p className="text-slate-800">{request.service_type_name || request.service_type}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-slate-600 mb-1">Request Source</p>
+                  <p className="text-slate-800">{request.request_source_label}</p>
                 </div>
               </div>
             </div>
@@ -392,13 +451,13 @@ export default function ClientRequestDetail() {
             </div>
 
             {/* Technician Assignment */}
-            {request.technician_name && (
+            {technicianLabel && (
               <div className="rounded-lg bg-white p-6 shadow-sm border border-slate-200">
                 <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
                   <FiUser className="text-slate-600" />
                   Assigned Technician
                 </h3>
-                <p className="text-slate-800 font-medium">{request.technician_name}</p>
+                <p className="text-slate-800 font-medium">{technicianLabel}</p>
                 {request.technician_contact && (
                   <p className="text-slate-600 text-sm mt-2">{request.technician_contact}</p>
                 )}
@@ -409,6 +468,22 @@ export default function ClientRequestDetail() {
               <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
                 This request is still in the request queue. Schedule changes and feedback will appear once a service
                 ticket is linked.
+              </div>
+            )}
+
+            {request.ticket_id && (
+              <div className="rounded-lg bg-white p-6 shadow-sm border border-slate-200">
+                <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-800">
+                  <FiClock className="text-slate-600" />
+                  Service Timeline
+                </h3>
+                <button
+                  type="button"
+                  onClick={openTimeline}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  View Ticket Timeline
+                </button>
               </div>
             )}
 
@@ -468,13 +543,13 @@ export default function ClientRequestDetail() {
                       <button
                         onClick={handleRequestReschedule}
                         disabled={rescheduleSubmitting}
-                        className="flex-1 px-4 py-2 bg-primary text-white rounded hover:bg-primary/90 transition disabled:opacity-50"
+                        className="flex-1 rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50"
                       >
                         {rescheduleSubmitting ? 'Submitting...' : 'Send Request'}
                       </button>
                       <button
                         onClick={() => setShowRescheduleForm(false)}
-                        className="flex-1 px-4 py-2 bg-slate-200 text-slate-700 rounded hover:bg-slate-300 transition"
+                        className="flex-1 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
                       >
                         Cancel
                       </button>
@@ -513,7 +588,7 @@ export default function ClientRequestDetail() {
                     <p className="text-sm text-slate-600 mt-1">Technician-verified completion photos</p>
                   </div>
                 </div>
-                
+
                 {loadingProofImages ? (
                   <div className="py-12 text-center">
                     <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-white shadow-md mb-4">
@@ -532,7 +607,7 @@ export default function ClientRequestDetail() {
                         </span>
                       </span>
                     </div>
-                    
+
                     {/* Image Gallery Grid */}
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 pt-2">
                       {proofImages.map((imageUrl, idx) => (
@@ -545,7 +620,7 @@ export default function ClientRequestDetail() {
                             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900">
                               <div className="text-center">
                                 <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-white/10 mb-2">
-                                  <span className="text-2xl">▶</span>
+                                  <span className="text-sm font-semibold text-white">Play</span>
                                 </div>
                                 <span className="text-xs text-white font-semibold">Video</span>
                               </div>
@@ -617,9 +692,9 @@ export default function ClientRequestDetail() {
                         <a
                           href={selectedImage}
                           download
-                          className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-6 py-3 rounded-lg text-sm font-semibold transition-all shadow-lg hover:shadow-xl transform hover:scale-105"
+                          className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600"
                         >
-                          ⬇ Download
+                          Download
                         </a>
                       </div>
                     </div>
@@ -632,7 +707,7 @@ export default function ClientRequestDetail() {
             {isCompleted && request.ticket_id && (
               <div className="rounded-lg bg-white p-6 shadow-sm border border-slate-200">
                 <h3 className="text-lg font-semibold text-slate-800 mb-4">Rate This Service</h3>
-                
+
                 {ratingSubmitted ? (
                   <div className="bg-green-50 border border-green-200 rounded p-4">
                     <p className="text-sm text-green-700 font-medium mb-2">Rating submitted</p>
@@ -649,7 +724,7 @@ export default function ClientRequestDetail() {
                     )}
                     <button
                       onClick={() => setShowRatingForm(true)}
-                      className="text-sm text-primary hover:underline mt-2"
+                      className="mt-2 text-sm font-medium text-brand-600 hover:underline"
                     >
                       Edit Rating
                     </button>
@@ -659,7 +734,7 @@ export default function ClientRequestDetail() {
                     {!showRatingForm && (
                       <button
                         onClick={() => setShowRatingForm(true)}
-                        className="w-full px-4 py-2 bg-primary text-white rounded hover:bg-primary/90 transition"
+                        className="w-full rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600"
                       >
                         Leave Feedback
                       </button>
@@ -696,7 +771,7 @@ export default function ClientRequestDetail() {
                             value={feedback}
                             onChange={(e) => setFeedback(e.target.value)}
                             placeholder="Share your experience..."
-                            className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                            className="w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
                             rows="3"
                           />
                         </div>
@@ -705,7 +780,7 @@ export default function ClientRequestDetail() {
                           <button
                             onClick={handleSubmitRating}
                             disabled={submitting || rating === 0}
-                            className="flex-1 px-4 py-2 bg-primary text-white rounded hover:bg-primary/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex-1 rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {submitting ? 'Submitting...' : 'Submit Rating'}
                           </button>
@@ -715,7 +790,7 @@ export default function ClientRequestDetail() {
                               setRating(0);
                               setFeedback('');
                             }}
-                            className="flex-1 px-4 py-2 bg-slate-200 text-slate-700 rounded hover:bg-slate-300 transition"
+                            className="flex-1 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
                           >
                             Cancel
                           </button>
@@ -729,6 +804,13 @@ export default function ClientRequestDetail() {
           </div>
         </div>
       </div>
+      <TicketTimelineModal
+        ticket={timelineOpen ? request : null}
+        events={timelineEvents}
+        loading={timelineLoading}
+        error={timelineError}
+        onClose={() => setTimelineOpen(false)}
+      />
     </Layout>
   );
 }

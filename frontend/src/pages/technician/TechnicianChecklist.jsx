@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import Layout from '../../components/Layout';
-import { fetchTechnicianJob, submitChecklist } from '../../api/api';
-import { FiCheckSquare, FiImage, FiSend, FiVideo } from 'react-icons/fi';
+import Layout from '../../components/layout/Layout';
+import { fetchServiceTypes, fetchTechnicianJob, submitChecklist } from '../../api/api';
+import { FiCheckSquare, FiImage, FiSend, FiVideo, FiTool } from 'react-icons/fi';
+import { formatTicketId } from '../../utils/roleIds';
+import { getLocalDateInputValue } from '../../utils/date';
 
-const checklists = {
+// Fallback checklists when ServiceType has no procedures configured
+const FALLBACK_CHECKLISTS = {
   'Solar Installation': [
     'Inspect installation area',
     'Install mounting brackets',
@@ -89,6 +92,67 @@ const followUpCaseOptions = [
   }
 ];
 
+const afterSalesDecisionOptions = [
+  {
+    value: 'none',
+    label: 'No warranty or follow-up',
+    warrantyIncluded: false,
+    followUpRequired: false
+  },
+  {
+    value: 'warranty_only',
+    label: 'Save warranty only',
+    warrantyIncluded: true,
+    followUpRequired: false
+  },
+  {
+    value: 'create_case',
+    label: 'Create follow-up task',
+    warrantyIncluded: null,
+    followUpRequired: true
+  }
+];
+
+const addDaysToLocalDate = (days) => {
+  const numericDays = Number(days);
+  if (!Number.isFinite(numericDays) || numericDays <= 0) return '';
+  const date = new Date();
+  date.setDate(date.getDate() + numericDays);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getDaysUntilLocalDate = (value) => {
+  if (!value) return '';
+  const today = new Date(`${getLocalDateInputValue()}T00:00:00`);
+  const target = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return '';
+  const days = Math.ceil((target - today) / 86400000);
+  return days > 0 ? String(days) : '';
+};
+
+const formatDateLabel = (value) => {
+  if (!value) return '';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+};
+
+const getStepTitle = (step, index) =>
+  typeof step === 'string' ? step : step?.title || step?.name || `Step ${index + 1}`;
+
+const getStepDescription = (step) =>
+  typeof step === 'string' ? '' : step?.description || '';
+
+const getEquipmentLabel = (item) => {
+  if (typeof item === 'string') return item;
+  const name = item?.name || 'Equipment';
+  const quantity = Number(item?.quantity || 0);
+  return quantity > 1 ? `${name} x${quantity}` : name;
+};
+
 export default function TechnicianChecklist() {
   const [searchParams] = useSearchParams();
   const ticketId = searchParams.get('ticketId') || searchParams.get('jobId');
@@ -105,6 +169,7 @@ export default function TechnicianChecklist() {
   const [maintenanceProfile, setMaintenanceProfile] = useState('');
   const [maintenanceIntervalDays, setMaintenanceIntervalDays] = useState('');
   const [maintenanceNotes, setMaintenanceNotes] = useState('');
+  const [afterSalesDecision, setAfterSalesDecision] = useState('');
   const [warrantyProvided, setWarrantyProvided] = useState(true);
   const [warrantyPeriodDays, setWarrantyPeriodDays] = useState('30');
   const [warrantyNotes, setWarrantyNotes] = useState('');
@@ -116,12 +181,66 @@ export default function TechnicianChecklist() {
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Dynamic data from ServiceType
+  const [dynamicProcedures, setDynamicProcedures] = useState(null);
+  const [requiredEquipment, setRequiredEquipment] = useState([]);
+  const [procedureSource, setProcedureSource] = useState('generic'); // 'dynamic', 'fallback', 'generic'
+
   const serviceType = job?.serviceType || job?.service || '';
-  const steps = checklists[serviceType] || GENERIC_CHECKLIST;
+
+  // Resolve steps: dynamic procedures > fallback > generic
+  const steps = (() => {
+    if (dynamicProcedures && dynamicProcedures.length > 0) return dynamicProcedures;
+    if (FALLBACK_CHECKLISTS[serviceType]) return FALLBACK_CHECKLISTS[serviceType];
+    return GENERIC_CHECKLIST;
+  })();
+
   const selectedMaintenanceProfile = maintenanceProfiles.find((item) => item.value === maintenanceProfile);
   const resolvedIntervalDays = maintenanceRequired
     ? Number(maintenanceIntervalDays || selectedMaintenanceProfile?.intervalDays || 0)
     : 0;
+  const automaticWarrantyDueDate = warrantyProvided ? addDaysToLocalDate(warrantyPeriodDays) : '';
+  const isWarrantyFollowUp = followUpRequired && followUpCaseType === 'warranty';
+  const selectedFollowUpCase = followUpCaseOptions.find((item) => item.value === followUpCaseType);
+  const maintenancePreview = maintenanceRequired
+    ? (resolvedIntervalDays > 0
+        ? `${selectedMaintenanceProfile?.label || 'Selected profile'} reminder, due about ${resolvedIntervalDays} days after completion`
+        : 'Maintenance reminder will be created after a profile or interval is selected')
+    : 'No future maintenance reminder';
+  const warrantyPreview = warrantyProvided
+    ? `${warrantyPeriodDays || 0} days coverage${automaticWarrantyDueDate ? `, estimated through ${formatDateLabel(automaticWarrantyDueDate)}` : ''}`
+    : 'No warranty coverage';
+  const followUpPreview = followUpRequired
+    ? `${selectedFollowUpCase?.label || 'Follow-up task'}${isWarrantyFollowUp && automaticWarrantyDueDate ? `, due around ${formatDateLabel(automaticWarrantyDueDate)}` : followUpDueDate ? `, due ${formatDateLabel(followUpDueDate)}` : ', default due date'}`
+    : 'No immediate after-sales follow-up task';
+
+  const handleAfterSalesDecision = (decision) => {
+    const option = afterSalesDecisionOptions.find((item) => item.value === decision);
+    if (!option) return;
+
+    setAfterSalesDecision(decision);
+    setFollowUpRequired(option.followUpRequired);
+
+    if (typeof option.warrantyIncluded === 'boolean') {
+      setWarrantyProvided(option.warrantyIncluded);
+    }
+
+    if (option.warrantyIncluded === false) {
+      setWarrantyNotes('');
+      setWarrantyPeriodDays('');
+      if (followUpCaseType === 'warranty') {
+        setFollowUpCaseType('follow_up');
+      }
+    } else if (option.warrantyIncluded !== false && !warrantyPeriodDays) {
+      setWarrantyPeriodDays('30');
+    }
+
+    if (!option.followUpRequired) {
+      setFollowUpDueDate('');
+      setFollowUpSummary('');
+      setFollowUpDetails('');
+    }
+  };
 
   useEffect(() => {
     if (!ticketId) {
@@ -136,6 +255,28 @@ export default function TechnicianChecklist() {
         const jobData = await fetchTechnicianJob(ticketId);
         setJob(jobData);
         setError('');
+
+        // Load dynamic procedures from ServiceType
+        try {
+          const stName = jobData?.serviceType || jobData?.service || '';
+          if (stName) {
+            const serviceTypes = await fetchServiceTypes();
+            const match = serviceTypes.find(st => st.name === stName);
+            if (match) {
+              const procs = Array.isArray(match.procedures) ? match.procedures : [];
+              const equip = Array.isArray(match.required_equipment) ? match.required_equipment : [];
+              if (procs.length > 0) {
+                setDynamicProcedures(procs);
+                setProcedureSource('dynamic');
+              } else if (FALLBACK_CHECKLISTS[stName]) {
+                setProcedureSource('fallback');
+              } else {
+                setProcedureSource('generic');
+              }
+              setRequiredEquipment(equip);
+            }
+          }
+        } catch { /* non-critical, will use fallback */ }
       } catch (loadError) {
         setJob(null);
         setError(loadError.message || 'Unable to load the selected job.');
@@ -191,6 +332,10 @@ export default function TechnicianChecklist() {
       setMessage('Select a maintenance profile so management can schedule the next service.');
       return;
     }
+    if (!afterSalesDecision) {
+      setMessage('Choose the after-sales result before submitting the checklist.');
+      return;
+    }
     if (warrantyProvided && (!warrantyPeriodDays || Number(warrantyPeriodDays) <= 0)) {
       setMessage('Enter a valid warranty coverage period.');
       return;
@@ -212,6 +357,14 @@ export default function TechnicianChecklist() {
         jobId: ticketId,
         ticketId,
         serviceType,
+        procedure_source: procedureSource,
+        required_equipment_snapshot: requiredEquipment,
+        checklist_items: steps.map((step, index) => ({
+          index,
+          label: getStepTitle(step, index),
+          description: getStepDescription(step),
+          completed: Boolean(completed[index])
+        })),
         completed,
         notes: techNotes,
         photos,
@@ -223,9 +376,10 @@ export default function TechnicianChecklist() {
         warranty_provided: warrantyProvided,
         warranty_period_days: warrantyProvided ? Number(warrantyPeriodDays) : null,
         warranty_notes: warrantyNotes,
+        after_sales_decision: afterSalesDecision,
         follow_up_required: followUpRequired,
         follow_up_case_type: followUpRequired ? followUpCaseType : null,
-        follow_up_due_date: followUpRequired && followUpDueDate ? followUpDueDate : null,
+        follow_up_due_date: followUpRequired && !isWarrantyFollowUp && followUpDueDate ? followUpDueDate : null,
         follow_up_summary: followUpRequired ? followUpSummary.trim() : null,
         follow_up_details: followUpRequired ? followUpDetails.trim() : null
       });
@@ -305,7 +459,7 @@ export default function TechnicianChecklist() {
       <div className="mb-8">
         <h2 className="mb-4 flex items-center gap-3 text-2xl font-semibold text-slate-800">
           <FiCheckSquare className="text-emerald-500" size={28} />
-          Digital Checklist - Ticket #{ticketId}
+          Digital Checklist - {formatTicketId(ticketId)}
         </h2>
         <div className="mb-6 flex flex-wrap gap-3 text-sm">
           <div className="rounded-full bg-emerald-50 px-4 py-2 font-medium text-emerald-900">
@@ -315,12 +469,39 @@ export default function TechnicianChecklist() {
             {job.address || 'Location pending'}
           </div>
         </div>
-        {!checklists[serviceType] && (
+        {procedureSource === 'dynamic' ? (
+          <p className="text-sm text-emerald-700">
+            ✅ Using <strong>admin-configured procedures</strong> for {serviceType}.
+          </p>
+        ) : procedureSource === 'fallback' ? (
+          <p className="text-sm text-blue-700">
+            Using built-in template checklist for {serviceType}.
+          </p>
+        ) : (
           <p className="text-sm text-amber-700">
             This ticket does not have a custom checklist template yet, so the general completion checklist is being used.
           </p>
         )}
       </div>
+
+      {/* Required Equipment */}
+      {requiredEquipment.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-sky-200 bg-sky-50 p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-sky-900">
+            <FiTool size={16} /> Required Equipment ({requiredEquipment.length})
+          </h3>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {requiredEquipment.map((item, idx) => (
+              <span
+                key={idx}
+                className="rounded-full bg-white px-3 py-1 text-xs font-medium text-sky-800 shadow-sm border border-sky-200"
+              >
+                {getEquipmentLabel(item)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mb-8 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 p-6 text-white shadow-lg">
         <div className="mb-2 flex items-center justify-between">
@@ -341,7 +522,7 @@ export default function TechnicianChecklist() {
         </div>
         <div className="space-y-4 p-6">
           {steps.map((step, index) => (
-            <div key={step} className="group flex items-start gap-3 rounded-xl border border-slate-200 p-4 transition hover:shadow-sm">
+            <div key={`${getStepTitle(step, index)}-${index}`} className="group flex items-start gap-3 rounded-xl border border-slate-200 p-4 transition hover:shadow-sm">
               <button
                 onClick={() => toggleStep(index)}
                 className={`mt-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border-2 transition-all duration-200 ${
@@ -353,7 +534,10 @@ export default function TechnicianChecklist() {
                 {completed[index] && <FiCheckSquare size={14} />}
               </button>
               <div className="min-w-0 flex-1">
-                <label className="mb-1 block text-sm font-medium text-slate-900">{step}</label>
+                <label className="mb-1 block text-sm font-medium text-slate-900">{getStepTitle(step, index)}</label>
+                {getStepDescription(step) && (
+                  <p className="mb-2 text-sm text-slate-500">{getStepDescription(step)}</p>
+                )}
                 {completed[index] && (
                   <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">Completed</span>
                 )}
@@ -366,11 +550,8 @@ export default function TechnicianChecklist() {
       <div className="mb-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Maintenance Logic</p>
-            <h3 className="mt-2 text-lg font-semibold text-slate-900">Plan the next maintenance window before you close the job.</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-              This sends the next maintenance target to after-sales management once the job is completed.
-            </p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Future Maintenance Reminder</p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-900">Should this site be checked again later?</h3>
           </div>
           <label className="inline-flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900">
             <input
@@ -378,7 +559,7 @@ export default function TechnicianChecklist() {
               checked={maintenanceRequired}
               onChange={(event) => setMaintenanceRequired(event.target.checked)}
             />
-            Create planned maintenance reminder
+            Create future maintenance reminder
           </label>
         </div>
 
@@ -458,24 +639,69 @@ export default function TechnicianChecklist() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Warranty Coverage</p>
-            <h3 className="mt-2 text-lg font-semibold text-slate-900">Capture the warranty period before the job closes.</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-              This lets the after-sales team and clients see whether future issues are covered or should become standard support work.
-            </p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-900">Is this completed job covered by warranty?</h3>
           </div>
-          <label className="inline-flex items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-900">
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          {afterSalesDecisionOptions.map((option) => {
+            const active = afterSalesDecision === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleAfterSalesDecision(option.value)}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  active
+                    ? 'border-sky-500 bg-sky-50 shadow-sm'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-slate-900">{option.label}</div>
+                  <div className={`h-3 w-3 rounded-full ${active ? 'bg-sky-500' : 'bg-slate-300'}`}></div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {afterSalesDecision === 'create_case' && (
+          <label className="mt-5 inline-flex items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-900">
             <input
               type="checkbox"
               checked={warrantyProvided}
-              onChange={(event) => setWarrantyProvided(event.target.checked)}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setWarrantyProvided(checked);
+      if (!checked) {
+        setWarrantyNotes('');
+        setWarrantyPeriodDays('');
+                  if (followUpCaseType === 'warranty') {
+                    setFollowUpCaseType('follow_up');
+                  }
+                } else if (!warrantyPeriodDays) {
+                  setWarrantyPeriodDays('30');
+                }
+              }}
             />
-            Warranty included
+            Include warranty coverage
           </label>
-        </div>
+        )}
 
-        <div className={`mt-5 grid gap-4 lg:grid-cols-[220px_1fr] ${warrantyProvided ? 'opacity-100' : 'pointer-events-none opacity-50'}`}>
+        <div className={`mt-5 grid gap-4 lg:grid-cols-[220px_220px_1fr] ${warrantyProvided ? 'opacity-100' : 'pointer-events-none opacity-50'}`}>
           <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-900">Warranty Days</label>
+            <label className="mb-2 block text-sm font-semibold text-slate-900">Warranty End Date</label>
+            <input
+              type="date"
+              min={addDaysToLocalDate(1)}
+              value={automaticWarrantyDueDate}
+              onChange={(event) => setWarrantyPeriodDays(getDaysUntilLocalDate(event.target.value))}
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-900">Coverage Days</label>
             <input
               type="number"
               min="1"
@@ -483,6 +709,9 @@ export default function TechnicianChecklist() {
               onChange={(event) => setWarrantyPeriodDays(event.target.value)}
               className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200"
             />
+            <p className="mt-2 text-xs text-slate-500">
+              {automaticWarrantyDueDate ? formatDateLabel(automaticWarrantyDueDate) : 'Select date'}
+            </p>
           </div>
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-900">Warranty Notes</label>
@@ -500,21 +729,9 @@ export default function TechnicianChecklist() {
       <div className="mb-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">After-Sales Handoff</p>
-            <h3 className="mt-2 text-lg font-semibold text-slate-900">Tell the follow-up team what should happen after this job closes.</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-              Use this only when the completed work needs immediate after-sales action. The case will appear in the
-              after-sales queue automatically after the ticket reaches completed status.
-            </p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">After-Sales Follow-up Task</p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-900">Does management need to follow up with the client?</h3>
           </div>
-          <label className="inline-flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
-            <input
-              type="checkbox"
-              checked={followUpRequired}
-              onChange={(event) => setFollowUpRequired(event.target.checked)}
-            />
-            Create after-sales handoff
-          </label>
         </div>
 
         <div className={`mt-5 ${followUpRequired ? 'opacity-100' : 'pointer-events-none opacity-50'}`}>
@@ -543,16 +760,28 @@ export default function TechnicianChecklist() {
           </div>
 
           <div className="mt-5 grid gap-4 lg:grid-cols-[240px_1fr]">
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-slate-900">Due Date</label>
-              <input
-                type="date"
-                value={followUpDueDate}
-                onChange={(event) => setFollowUpDueDate(event.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
-              <p className="mt-2 text-xs text-slate-500">Leave blank to let the system set the default urgency.</p>
-            </div>
+            {isWarrantyFollowUp ? (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+                <label className="mb-2 block text-sm font-semibold text-slate-900">Due Date</label>
+                <p className="text-sm font-semibold text-sky-900">
+                  {automaticWarrantyDueDate ? formatDateLabel(automaticWarrantyDueDate) : 'Generated from warranty days'}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-sky-800">
+                  The final warranty case due date is generated by the backend from the ticket completion date plus the warranty days.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-900">Due Date</label>
+                <input
+                  type="date"
+                  value={followUpDueDate}
+                  onChange={(event) => setFollowUpDueDate(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                />
+                <p className="mt-2 text-xs text-slate-500">Leave blank to let the system set the default urgency.</p>
+              </div>
+            )}
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-900">Handoff Summary</label>
               <input
@@ -583,7 +812,9 @@ export default function TechnicianChecklist() {
                 customer is expecting.
               </>
             ) : (
-              'No immediate after-sales case will be created from this job.'
+              warrantyProvided
+                ? 'Warranty coverage will be saved, but no immediate after-sales follow-up task will be created.'
+                : 'No warranty coverage or immediate after-sales follow-up task will be created.'
             )}
           </div>
         </div>
@@ -648,6 +879,34 @@ export default function TechnicianChecklist() {
             >
               <FiVideo /> Add Video
             </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Completion Summary</p>
+        <h3 className="mt-2 text-lg font-semibold text-slate-900">Review before submit.</h3>
+        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Future Maintenance</div>
+            <p className="mt-2 text-sm leading-6 text-emerald-950">{maintenancePreview}</p>
+            {maintenanceRequired && maintenanceNotes.trim() && (
+              <p className="mt-2 text-xs leading-5 text-emerald-800">{maintenanceNotes.trim()}</p>
+            )}
+          </div>
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-sky-700">Warranty</div>
+            <p className="mt-2 text-sm leading-6 text-sky-950">{warrantyPreview}</p>
+            {warrantyProvided && warrantyNotes.trim() && (
+              <p className="mt-2 text-xs leading-5 text-sky-800">{warrantyNotes.trim()}</p>
+            )}
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">After-Sales Follow-up</div>
+            <p className="mt-2 text-sm leading-6 text-amber-950">{followUpPreview}</p>
+            {followUpRequired && followUpSummary.trim() && (
+              <p className="mt-2 text-xs leading-5 text-amber-800">{followUpSummary.trim()}</p>
+            )}
           </div>
         </div>
       </div>

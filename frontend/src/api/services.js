@@ -116,6 +116,26 @@ export const fetchServiceTickets = async (filters = {}) => {
   }
 };
 
+export const fetchTicketTimeline = async (ticketId) => {
+  try {
+    const { data } = await api.get('/services/status-history/', { params: { ticket: ticketId } });
+    const events = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
+    return events
+      .map((event) => ({
+        id: event.id,
+        ticketId: event.ticket,
+        status: event.status,
+        actor: event.changed_by_name || 'System',
+        actorId: event.changed_by || null,
+        notes: event.notes || '',
+        timestamp: event.timestamp
+      }))
+      .sort((left, right) => new Date(right.timestamp || 0) - new Date(left.timestamp || 0));
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load ticket timeline.'));
+  }
+};
+
 export const fetchServiceTypes = async () => {
   try {
     const { data } = await api.get('/services/service-types/');
@@ -136,9 +156,37 @@ export const createServiceRequest = async (requestData) => {
   }
 };
 
-export const fetchCoverageHeatmap = async () => {
+export const searchLocations = async ({ query, viewbox, bounded = true, limit = 5 }) => {
   try {
-    const { data } = await api.get('/services/coverage-heatmap/service_density/');
+    const params = {
+      q: query,
+      limit
+    };
+    if (viewbox) params.viewbox = viewbox;
+    if (bounded) params.bounded = '1';
+    const { data } = await api.get('/geocode/search/', { params });
+    return Array.isArray(data?.results) ? data.results : [];
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to search locations.'));
+  }
+};
+
+export const reverseGeocodeLocation = async ({ lat, lng }) => {
+  try {
+    const { data } = await api.get('/geocode/reverse/', { params: { lat, lon: lng } });
+    return data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to read the selected location.'));
+  }
+};
+
+export const fetchCoverageHeatmap = async (filters = {}) => {
+  try {
+    const params = {};
+    if (filters.client) params.client = filters.client;
+    if (filters.technician) params.technician = filters.technician;
+    if (filters.serviceType) params.service_type = filters.serviceType;
+    const { data } = await api.get('/services/coverage-heatmap/service_density/', { params });
     return data;
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to load coverage heatmap.'));
@@ -158,12 +206,33 @@ export const fetchFollowUpCases = async (filters = {}) => {
     if (filters.assignedOnly) {
       params.assigned_only = 'true';
     }
+    if (filters.priority) {
+      params.priority = filters.priority;
+    }
+    if (filters.creationSource) {
+      params.creation_source = filters.creationSource;
+    }
+    if (filters.search) {
+      params.search = filters.search;
+    }
+    if (filters.ordering) {
+      params.ordering = filters.ordering;
+    }
 
     const { data } = await api.get('/services/follow-up-cases/', { params });
     const caseArray = Array.isArray(data) ? data : (data.results || []);
     return Array.isArray(caseArray) ? caseArray : [];
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to load follow-up cases.'));
+  }
+};
+
+export const approveServiceRequest = async (requestId) => {
+  try {
+    const { data } = await api.post(`/services/service-requests/${requestId}/approve/`);
+    return data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to approve service request.'));
   }
 };
 
@@ -185,12 +254,30 @@ export const updateFollowUpCase = async (caseId, updates) => {
   }
 };
 
-export const fetchTechnicianCoverage = async () => {
+export const fetchTechnicianCoverage = async (filters = {}) => {
   try {
-    const { data } = await api.get('/services/coverage-heatmap/technician_coverage/');
+    const params = {};
+    if (filters.technician) params.technician = filters.technician;
+    const { data } = await api.get('/services/coverage-heatmap/technician_coverage/', { params });
     return data;
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to load technician coverage.'));
+  }
+};
+
+export const fetchCompletedJobsHistory = async (filters = {}) => {
+  try {
+    const params = {};
+    if (filters.days) params.days = filters.days;
+    if (filters.serviceType) params.service_type = filters.serviceType;
+    if (filters.client) params.client = filters.client;
+    if (filters.technician) params.technician = filters.technician;
+    if (filters.search) params.search = filters.search;
+
+    const { data } = await api.get('/services/coverage-heatmap/completed_jobs/', { params });
+    return data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load completed job history.'));
   }
 };
 

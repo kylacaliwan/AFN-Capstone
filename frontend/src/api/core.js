@@ -87,6 +87,15 @@ const getDisplayName = (user) => {
   return fullName || user?.username || 'Unknown';
 };
 
+const toInteger = (value) => {
+  if (value == null || value === '') {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+};
+
 export const normalizeTechnicianStatus = (user) => {
   if (user?.status !== 'active') {
     return 'offline';
@@ -96,15 +105,6 @@ export const normalizeTechnicianStatus = (user) => {
 
 export const normalizeSla = (sla) => {
   const state = String(sla?.state || 'inactive').toLowerCase();
-  const toInteger = (value) => {
-    if (value == null || value === '') {
-      return null;
-    }
-
-    const numericValue = Number(value);
-    return Number.isFinite(numericValue) ? numericValue : null;
-  };
-
   return {
     ...sla,
     state,
@@ -135,6 +135,15 @@ export const normalizeUser = (user) => ({
 export const normalizeTicket = (ticket) => {
   const requestDetails = ticket?.request_details || {};
   const location = requestDetails?.location || {};
+  const serviceItems = Array.isArray(requestDetails?.service_items) ? requestDetails.service_items : [];
+  const serviceNames = serviceItems
+    .map((item) => item?.service_type_name)
+    .filter(Boolean);
+  const clientId = ticket?.client_id || requestDetails?.client || null;
+  const clientFullname = ticket?.client_fullname || requestDetails?.client_fullname || requestDetails?.client_name || ticket?.client || 'Unknown';
+  const technicianFullname = ticket?.technician_fullname || ticket?.technician_name || '';
+  const requestSource = requestDetails?.request_source || ticket?.request_source || 'client_portal';
+  const requestSourceLabel = requestDetails?.request_source_label || ticket?.request_source_label || 'Client Portal';
   const crewMembers = Array.isArray(ticket?.crew_members)
     ? ticket.crew_members.map((member) => ({
         ...member,
@@ -145,11 +154,24 @@ export const normalizeTicket = (ticket) => {
     ...ticket,
     requestId: ticket?.request || requestDetails?.id || null,
     client: requestDetails?.client_name || requestDetails?.client || ticket?.client || 'Unknown',
-    service: requestDetails?.service_type_name || ticket?.service || 'Service',
+    clientId,
+    clientFullname,
+    requestSource,
+    requestSourceLabel,
+    serviceTypeId: requestDetails?.service_type || ticket?.service_type || ticket?.serviceTypeId || null,
+    serviceItems,
+    service: requestDetails?.service_summary || serviceNames.join(', ') || requestDetails?.service_type_name || ticket?.service || 'Service',
     status: String(ticket?.status || 'unknown').toLowerCase().replace(/\s+/g, '_'),
     priority: String(ticket?.priority || 'normal').toLowerCase(),
     assignedTech: ticket?.technician_name || '',
     assignedTechnicianId: ticket?.technician || ticket?.technician_id || null,
+    technicianFullname,
+    supervisorId: ticket?.supervisor || ticket?.supervisor_id || null,
+    supervisorName: ticket?.supervisor_name || ticket?.supervisor_fullname || '',
+    assignedById: ticket?.assigned_by_id || null,
+    assignedByName: ticket?.assigned_by_name || '',
+    assignedByRole: ticket?.assigned_by_role || '',
+    assignedAt: ticket?.assigned_at || null,
     crewMembers,
     crewSummary: crewMembers.map((member) => member.name).join(', '),
     teamSize: (ticket?.technician_name ? 1 : 0) + crewMembers.length,
@@ -164,11 +186,18 @@ export const normalizeTicket = (ticket) => {
     scheduledTimeSlot: ticket?.scheduled_time_slot || '',
     rescheduleRequested: Boolean(ticket?.reschedule_requested),
     rescheduleReason: ticket?.reschedule_reason || '',
+    completionNotes: ticket?.completion_notes || '',
     warrantyStatus: ticket?.warranty_status || 'not_applicable',
     warrantyEndDate: ticket?.warranty_end_date || null,
     smartAssignmentScore: ticket?.smart_assignment_score ?? null,
     smartAssignmentSummary: ticket?.smart_assignment_summary || '',
     inventoryReservations: Array.isArray(ticket?.inventory_reservations) ? ticket.inventory_reservations : [],
+    dispatchStatus: ticket?.dispatch_status || '',
+    dispatchLabel: ticket?.dispatch_label || '',
+    dispatchAction: ticket?.dispatch_action || '',
+    isMissedDispatch: Boolean(ticket?.is_missed_dispatch),
+    missedDispatchAt: ticket?.missed_dispatch_at || null,
+    dispatchOverdueDays: toInteger(ticket?.dispatch_overdue_days) ?? 0,
     sla: normalizeSla(ticket?.sla)
   };
 };

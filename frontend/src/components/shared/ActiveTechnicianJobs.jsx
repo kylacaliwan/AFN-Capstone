@@ -1,5 +1,5 @@
 import { FiAlertCircle, FiMapPin, FiUser, FiClock } from 'react-icons/fi';
-import StatusBadge from './StatusBadge';
+import StatusBadge from '../ui/StatusBadge';
 
 export default function ActiveTechnicianJobs({ jobs = [], title = 'Active Technician Jobs' }) {
   if (!jobs || jobs.length === 0) {
