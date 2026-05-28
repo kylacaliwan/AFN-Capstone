@@ -441,13 +441,13 @@ class ServiceRequestTicketLifecycleTests(APITestCase):
         self.assertEqual(float(request_obj.location.latitude), 14.5547)
         self.assertEqual(float(request_obj.location.longitude), 121.0244)
 
-    def test_legacy_request_payload_is_mapped_and_persisted(self):
+    def test_legacy_location_payload_is_mapped_and_persisted(self):
         self.client.force_authenticate(user=self.client_user)
 
         response = self.client.post(
             '/api/services/service-requests/',
             {
-                'service': self.service_type.name,
+                'service_type': self.service_type.id,
                 'notes': 'Legacy request payload still works',
                 'lat': '14.600000',
                 'lng': '121.050000',
@@ -682,11 +682,6 @@ class FollowUpCaseApiTests(APITestCase):
             password='pass',
             role='admin',
         )
-        self.follow_up_user = User.objects.create_user(
-            username='follow-up-agent',
-            password='pass',
-            role='follow_up',
-        )
         self.service_type = ServiceType.objects.create(
             name='Maintenance',
             description='Maintenance service',
@@ -725,8 +720,8 @@ class FollowUpCaseApiTests(APITestCase):
             priority='Normal',
         )
 
-    def test_follow_up_user_can_create_case_for_completed_ticket(self):
-        self.client.force_authenticate(user=self.follow_up_user)
+    def test_admin_can_create_case_for_completed_ticket(self):
+        self.client.force_authenticate(user=self.admin_user)
 
         response = self.client.post(
             '/api/services/follow-up-cases/',
@@ -744,15 +739,15 @@ class FollowUpCaseApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         case = FollowUpCase.objects.get(id=response.data['id'])
         self.assertEqual(case.client, self.client_user)
-        self.assertEqual(case.created_by, self.follow_up_user)
-        self.assertEqual(case.assigned_to, self.follow_up_user)
+        self.assertEqual(case.created_by, self.admin_user)
+        self.assertIsNone(case.assigned_to)
         self.assertEqual(case.service_ticket, self.completed_ticket)
         self.assertEqual(response.data['client_email'], 'followup-client@example.com')
         self.assertEqual(response.data['client_phone'], '+15550000002')
         self.assertEqual(response.data['service_address'], '321 Service Road')
 
     def test_follow_up_case_creation_rejects_non_completed_ticket(self):
-        self.client.force_authenticate(user=self.follow_up_user)
+        self.client.force_authenticate(user=self.admin_user)
 
         response = self.client.post(
             '/api/services/follow-up-cases/',
@@ -771,13 +766,13 @@ class FollowUpCaseApiTests(APITestCase):
         self.assertEqual(FollowUpCase.objects.count(), 0)
 
     def test_follow_up_case_filters_run_in_database(self):
-        self.client.force_authenticate(user=self.follow_up_user)
+        self.client.force_authenticate(user=self.admin_user)
         today = timezone.localdate()
         overdue_case = FollowUpCase.objects.create(
             service_ticket=self.completed_ticket,
             client=self.client_user,
-            assigned_to=self.follow_up_user,
-            created_by=self.follow_up_user,
+            assigned_to=self.admin_user,
+            created_by=self.admin_user,
             case_type='complaint',
             status='open',
             priority='urgent',
@@ -788,8 +783,8 @@ class FollowUpCaseApiTests(APITestCase):
         FollowUpCase.objects.create(
             service_ticket=self.completed_ticket,
             client=self.client_user,
-            assigned_to=self.follow_up_user,
-            created_by=self.follow_up_user,
+            assigned_to=self.admin_user,
+            created_by=self.admin_user,
             case_type='feedback',
             status='resolved',
             priority='low',
@@ -809,12 +804,12 @@ class FollowUpCaseApiTests(APITestCase):
         self.assertEqual(rows[0]['id'], overdue_case.id)
 
     def test_follow_up_case_search_uses_api_query(self):
-        self.client.force_authenticate(user=self.follow_up_user)
+        self.client.force_authenticate(user=self.admin_user)
         matching_case = FollowUpCase.objects.create(
             service_ticket=self.completed_ticket,
             client=self.client_user,
-            assigned_to=self.follow_up_user,
-            created_by=self.follow_up_user,
+            assigned_to=self.admin_user,
+            created_by=self.admin_user,
             case_type='warranty',
             status='in_progress',
             priority='high',
@@ -824,8 +819,8 @@ class FollowUpCaseApiTests(APITestCase):
         FollowUpCase.objects.create(
             service_ticket=self.completed_ticket,
             client=self.client_user,
-            assigned_to=self.follow_up_user,
-            created_by=self.follow_up_user,
+            assigned_to=self.admin_user,
+            created_by=self.admin_user,
             case_type='feedback',
             status='open',
             priority='normal',
@@ -1131,10 +1126,10 @@ class OperationalDataAccessTests(APITestCase):
             password='pass',
             role='client',
         )
-        self.supervisor_user = User.objects.create_user(
-            username='ops_supervisor',
+        self.operations_admin = User.objects.create_user(
+            username='ops_admin',
             password='pass',
-            role='supervisor',
+            role='admin',
         )
 
     def test_client_cannot_access_operational_intelligence_endpoints(self):
@@ -1153,8 +1148,8 @@ class OperationalDataAccessTests(APITestCase):
             response = self.client.get(endpoint)
             self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, endpoint)
 
-    def test_supervisor_can_access_operational_dashboards(self):
-        self.client.force_authenticate(user=self.supervisor_user)
+    def test_admin_can_access_operational_dashboards(self):
+        self.client.force_authenticate(user=self.operations_admin)
 
         for endpoint in (
             '/api/services/gis-dashboard/dashboard_data/',
@@ -1421,7 +1416,7 @@ class MaintenanceWorkflowTests(APITestCase):
         self.follow_up_user = User.objects.create_user(
             username='maintenance-follow-up',
             password='pass',
-            role='follow_up',
+            role='admin',
         )
         self.technician_user = User.objects.create_user(
             username='maintenance-tech',
@@ -1616,7 +1611,7 @@ class MaintenanceWorkflowTests(APITestCase):
         response = self.client.get('/api/services/dashboard/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['overview']['maintenance_due_soon'], 1)
+        self.assertEqual(response.data['overview']['due_soon_maintenance'], 1)
         self.assertEqual(len(response.data['maintenance_queue']), 1)
         self.assertEqual(response.data['maintenance_queue'][0]['ticket_id'], self.ticket.id)
 
@@ -2493,14 +2488,14 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
         self.assertIn(ticket.id, [item['id'] for item in queue_response.data['results']])
         self.assertTrue(any(item['id'] == ticket.id for item in dashboard_response.data['operations']['recent_tickets']))
 
-    def test_supervisor_without_ticket_queue_capability_cannot_approve_request(self):
-        limited_supervisor = User.objects.create_user(
-            username='tracking_only_supervisor',
+    def test_non_admin_with_tracking_capability_cannot_approve_request(self):
+        tracking_only_user = User.objects.create_user(
+            username='tracking_only_staff',
             password='pass',
-            role='supervisor',
+            role='technician',
         )
         UserCapabilityGrant.objects.create(
-            user=limited_supervisor,
+            user=tracking_only_user,
             capability_code=SUPERVISOR_TRACKING_VIEW,
             granted_by=self.admin_user,
         )
@@ -2513,7 +2508,7 @@ class SchedulingWarrantyAndAssignmentTests(APITestCase):
             status='Pending',
         )
 
-        self.client.force_authenticate(user=limited_supervisor)
+        self.client.force_authenticate(user=tracking_only_user)
         response = self.client.post(
             f'/api/services/service-requests/{request_obj.id}/approve/',
             {},
@@ -3053,7 +3048,7 @@ class SLAApiIntegrationTests(APITestCase):
         self.supervisor_user = User.objects.create_user(
             username='sla-supervisor',
             password='pass',
-            role='supervisor',
+            role='admin',
         )
         self.client_user = User.objects.create_user(
             username='sla-api-client',
@@ -3178,7 +3173,7 @@ class SLAApiIntegrationTests(APITestCase):
         self.assertEqual(response.data['sla_queue'][0]['entity_type'], 'request')
         self.assertEqual(response.data['sla_queue'][0]['sla']['state'], 'overdue')
 
-    def test_supervisor_dashboard_includes_team_sla_summary(self):
+    def test_admin_dashboard_alias_includes_team_sla_summary(self):
         self.client.force_authenticate(user=self.supervisor_user)
 
         with patch('services.views_dashboard.timezone.now', return_value=self.now):
@@ -3188,4 +3183,4 @@ class SLAApiIntegrationTests(APITestCase):
         self.assertIn('sla_overview', response.data)
         self.assertEqual(response.data['sla_overview']['start_delay_risk'], 1)
         self.assertEqual(response.data['sla_overview']['execution_risk'], 1)
-        self.assertEqual(len(response.data['sla_queue']), 2)
+        self.assertEqual(len(response.data['sla_queue']), 3)

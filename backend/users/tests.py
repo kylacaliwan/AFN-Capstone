@@ -22,7 +22,6 @@ from .rbac import (
     TECHNICIAN_JOBS_VIEW,
     TECHNICIAN_PROFILE_VIEW,
     USER_DIRECTORY_VIEW,
-    can_receive_delegated_authority,
     get_default_admin_scope_for_role,
     is_admin_scoped_role,
     is_admin_workspace_role,
@@ -182,11 +181,13 @@ class UserRegistrationTests(APITestCase):
 
 
 class RoleClassificationTests(APITestCase):
-    def test_follow_up_is_admin_scoped_but_not_full_admin_workspace(self):
-        self.assertTrue(is_admin_scoped_role('follow_up'))
-        self.assertTrue(can_receive_delegated_authority('follow_up'))
+    def test_admin_roles_own_internal_workspaces(self):
+        self.assertTrue(is_admin_scoped_role('admin'))
+        self.assertTrue(is_admin_workspace_role('admin'))
+        self.assertEqual(get_default_admin_scope_for_role('admin'), 'general')
+        self.assertFalse(is_admin_scoped_role('follow_up'))
         self.assertFalse(is_admin_workspace_role('follow_up'))
-        self.assertEqual(get_default_admin_scope_for_role('follow_up'), 'service_follow_up')
+        self.assertIsNone(get_default_admin_scope_for_role('follow_up'))
 
 
 class UserLoginTests(APITestCase):
@@ -216,7 +217,7 @@ class UserLoginTests(APITestCase):
             username='legacy_user',
             email='legacy@example.com',
             password='legacy-pass',
-            role='supervisor',
+            role='client',
             is_active=True
         )
 
@@ -502,17 +503,17 @@ class AdminSettingsTests(APITestCase):
 
 class AdminTechnicianAccessTests(APITestCase):
     def setUp(self):
-        self.supervisor = User.objects.create_user(
-            username='dispatch_supervisor',
-            email='dispatch_supervisor@example.com',
-            password='Password123!',
-            role='supervisor'
-        )
-        self.admin = User.objects.create_user(
-            username='dispatch_admin',
-            email='dispatch_admin@example.com',
+        self.operations_admin = User.objects.create_user(
+            username='dispatch_operations_admin',
+            email='dispatch_operations_admin@example.com',
             password='Password123!',
             role='admin'
+        )
+        self.superadmin = User.objects.create_user(
+            username='dispatch_superadmin',
+            email='dispatch_superadmin@example.com',
+            password='Password123!',
+            role='superadmin'
         )
         self.technician = User.objects.create_user(
             username='dispatch_tech',
@@ -522,19 +523,19 @@ class AdminTechnicianAccessTests(APITestCase):
             status='active',
             is_available=True
         )
-        self.supervisor_token = Token.objects.create(user=self.supervisor)
-        self.admin_token = Token.objects.create(user=self.admin)
+        self.operations_admin_token = Token.objects.create(user=self.operations_admin)
+        self.superadmin_token = Token.objects.create(user=self.superadmin)
 
-    def test_supervisor_can_list_technicians_for_dispatch(self):
-        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.supervisor_token.key}')
+    def test_admin_can_list_technicians_for_dispatch(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.operations_admin_token.key}')
 
         response = self.client.get('/api/admin/technicians/')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(any(item['id'] == self.technician.id for item in response.data))
 
-    def test_supervisor_cannot_create_technician(self):
-        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.supervisor_token.key}')
+    def test_admin_cannot_create_technician(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.operations_admin_token.key}')
 
         response = self.client.post('/api/admin/technicians/', {
             'username': 'should_fail',
@@ -821,12 +822,6 @@ class CapabilityGrantApiTests(APITestCase):
             password='Password123!',
             role='admin'
         )
-        self.supervisor_user = User.objects.create_user(
-            username='cap_supervisor',
-            email='cap_supervisor@example.com',
-            password='Password123!',
-            role='supervisor'
-        )
         self.technician_user = User.objects.create_user(
             username='cap_technician',
             email='cap_technician@example.com',
@@ -846,8 +841,8 @@ class CapabilityGrantApiTests(APITestCase):
             role='client'
         )
 
-    def test_admin_can_grant_direct_capabilities_to_staff(self):
-        token = Token.objects.create(user=self.admin_user)
+    def test_superadmin_can_grant_direct_capabilities_to_staff(self):
+        token = Token.objects.create(user=self.superadmin_user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
 
         response = self.client.put(
@@ -868,8 +863,8 @@ class CapabilityGrantApiTests(APITestCase):
         )
         self.assertIn(TECHNICIAN_DASHBOARD_VIEW, response.data['effective_capabilities'])
 
-    def test_supervisor_can_only_grant_allowed_staff_capabilities(self):
-        token = Token.objects.create(user=self.supervisor_user)
+    def test_admin_cannot_grant_staff_capabilities(self):
+        token = Token.objects.create(user=self.admin_user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
 
         response = self.client.put(
@@ -882,17 +877,11 @@ class CapabilityGrantApiTests(APITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(
-            UserCapabilityGrant.objects.filter(
-                user=self.technician_user,
-                capability_code=TECHNICIAN_PROFILE_VIEW,
-                granted_by=self.supervisor_user,
-            ).exists()
-        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(UserCapabilityGrant.objects.filter(user=self.technician_user).exists())
 
-    def test_supervisor_cannot_manage_admin_capabilities(self):
-        token = Token.objects.create(user=self.supervisor_user)
+    def test_admin_cannot_manage_admin_capabilities(self):
+        token = Token.objects.create(user=self.admin_user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
 
         response = self.client.get(f'/api/users/{self.other_admin.id}/capabilities/')
@@ -914,7 +903,7 @@ class CapabilityGrantApiTests(APITestCase):
         self.assertIn(AFTER_SALES_CASES_VIEW, response.data['capabilities'])
 
     def test_available_capabilities_are_scoped_to_the_target_staff_role(self):
-        token = Token.objects.create(user=self.admin_user)
+        token = Token.objects.create(user=self.superadmin_user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
 
         response = self.client.get(f'/api/users/{self.technician_user.id}/capabilities/')
@@ -995,7 +984,7 @@ class CapabilityGrantApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         usernames = {item['username'] for item in response.data}
         self.assertIn(self.admin_user.username, usernames)
-        self.assertIn(self.supervisor_user.username, usernames)
+        self.assertIn(self.technician_user.username, usernames)
         self.assertIn(self.client_user.username, usernames)
 
 

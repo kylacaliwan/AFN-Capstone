@@ -197,7 +197,7 @@ class Command(BaseCommand):
                 status='active',
                 password='FollowUp@2024'
             )
-            self.stdout.write(self.style.SUCCESS(f"  ✓ Created follow_up user"))
+            self.stdout.write(self.style.SUCCESS(f"  ✓ Created after-sales admin user"))
 
         # Create cases for completed tickets
         completed_tickets = ServiceTicket.objects.filter(status='Completed')

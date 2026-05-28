@@ -197,6 +197,18 @@ class RoleCapabilityPermission(permissions.BasePermission):
         )
 
 
+class AdminWorkspaceCapabilityPermission(permissions.BasePermission):
+    capability_codes = set()
+
+    def has_permission(self, request, view):
+        return (
+            request.user and
+            request.user.is_authenticated and
+            is_admin_workspace_role(request.user.role) and
+            user_has_any_capability(request.user, self.capability_codes)
+        )
+
+
 class AdminOrRoleCapabilityPermission(RoleCapabilityPermission):
     def has_permission(self, request, view):
         return (
@@ -209,42 +221,35 @@ class AdminOrRoleCapabilityPermission(RoleCapabilityPermission):
         )
 
 
-class CanAccessAfterSales(AdminOrRoleCapabilityPermission):
-    """Follow-up users can open after-sales pages when granted."""
+class CanAccessAfterSales(AdminWorkspaceCapabilityPermission):
+    """Admin workspace users can open after-sales pages when granted."""
 
-    required_role = 'follow_up'
     capability_codes = AFTER_SALES_VIEW_CAPABILITIES
 
 
-class CanManageAfterSalesCases(AdminOrRoleCapabilityPermission):
-    """Follow-up users can create and update after-sales cases when granted."""
+class CanManageAfterSalesCases(AdminWorkspaceCapabilityPermission):
+    """Admin workspace users can create and update after-sales cases when granted."""
 
-    required_role = 'follow_up'
     capability_codes = AFTER_SALES_MANAGE_CAPABILITIES
 
 
-class CanViewSupervisorDashboard(RoleCapabilityPermission):
-    required_role = 'supervisor'
+class CanViewSupervisorDashboard(AdminWorkspaceCapabilityPermission):
     capability_codes = SUPERVISOR_DASHBOARD_CAPABILITIES
 
 
-class CanViewSupervisorTickets(AdminOrRoleCapabilityPermission):
-    required_role = 'supervisor'
+class CanViewSupervisorTickets(AdminWorkspaceCapabilityPermission):
     capability_codes = SUPERVISOR_TICKET_CAPABILITIES
 
 
-class CanViewSupervisorDispatch(AdminOrRoleCapabilityPermission):
-    required_role = 'supervisor'
+class CanViewSupervisorDispatch(AdminWorkspaceCapabilityPermission):
     capability_codes = SUPERVISOR_DISPATCH_CAPABILITIES
 
 
-class CanViewSupervisorTracking(AdminOrRoleCapabilityPermission):
-    required_role = 'supervisor'
+class CanViewSupervisorTracking(AdminWorkspaceCapabilityPermission):
     capability_codes = SUPERVISOR_TRACKING_CAPABILITIES
 
 
-class CanViewSupervisorTechnicianDirectory(AdminOrRoleCapabilityPermission):
-    required_role = 'supervisor'
+class CanViewSupervisorTechnicianDirectory(AdminWorkspaceCapabilityPermission):
     capability_codes = SUPERVISOR_TECHNICIAN_DIRECTORY_CAPABILITIES
 
 

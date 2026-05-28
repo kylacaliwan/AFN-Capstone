@@ -344,7 +344,7 @@ class SLAEscalationTests(TestCase):
         self.supervisor = User.objects.create_user(
             username='supervisor',
             password='pass123',
-            role='supervisor',
+            role='admin',
             status='active'
         )
 

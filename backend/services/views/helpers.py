@@ -211,7 +211,7 @@ ALLOWED_TICKET_TRANSITIONS = {
 ASSIGNABLE_TICKET_STATUSES = {'Not Started', 'On Hold'}
 CLIENT_RESCHEDULABLE_TICKET_STATUSES = {'Not Started'}
 CONTACTABLE_TICKET_STATUSES = {'Not Started', 'In Progress', 'On Hold'}
-PARTS_REQUEST_TICKET_STATUSES = {'Not Started', 'In Progress', 'On Hold'}
+PARTS_REQUEST_TICKET_STATUSES = {'In Progress', 'On Hold'}
 TIME_SLOT_TO_TIME = {
     'morning': time(hour=9, minute=0),
     'midday': time(hour=12, minute=0),
