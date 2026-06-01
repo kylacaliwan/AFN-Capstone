@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.contrib.auth.password_validation import validate_password
-from .models import AdminSettings, ChangeLog, User, TechnicianProfile, ClientProfile, ManagementProfile
+from .models import ActivityLog, AdminSettings, ChangeLog, User, TechnicianProfile, ClientProfile, ManagementProfile
 from .rbac import (
     get_default_admin_scope_for_role,
     get_unknown_capability_codes,
@@ -231,6 +231,73 @@ class ChangeLogSerializer(serializers.ModelSerializer):
             return 'System'
         full_name = f'{user.first_name} {user.last_name}'.strip()
         return full_name or user.username
+
+
+class ActivityLogSerializer(serializers.ModelSerializer):
+    actor_name = serializers.SerializerMethodField()
+    model = serializers.CharField(source='target_model', read_only=True)
+    app_label = serializers.CharField(source='target_app_label', read_only=True)
+    object_id = serializers.IntegerField(source='target_id', read_only=True)
+    object_label = serializers.CharField(source='target_label', read_only=True)
+    changed_by = serializers.IntegerField(source='actor_id', read_only=True)
+    changed_by_name = serializers.SerializerMethodField()
+    changed_by_role = serializers.CharField(source='actor_role', read_only=True)
+    changed_at = serializers.DateTimeField(source='created_at', read_only=True)
+    field_name = serializers.SerializerMethodField()
+    old_value = serializers.SerializerMethodField()
+    new_value = serializers.SerializerMethodField()
+    summary = serializers.CharField(source='message', read_only=True)
+
+    class Meta:
+        model = ActivityLog
+        fields = [
+            'id',
+            'category',
+            'action',
+            'actor',
+            'actor_name',
+            'actor_role',
+            'message',
+            'target_app_label',
+            'target_model',
+            'target_id',
+            'target_label',
+            'metadata',
+            'ip_address',
+            'user_agent',
+            'created_at',
+            # Backward-compatible keys for existing frontend/tests.
+            'app_label',
+            'model',
+            'object_id',
+            'object_label',
+            'changed_by',
+            'changed_by_name',
+            'changed_by_role',
+            'changed_at',
+            'field_name',
+            'old_value',
+            'new_value',
+            'summary',
+        ]
+        read_only_fields = fields
+
+    def get_actor_name(self, obj):
+        if not obj.actor:
+            return 'System'
+        return obj.actor.get_full_name().strip() or obj.actor.username
+
+    def get_changed_by_name(self, obj):
+        return self.get_actor_name(obj)
+
+    def get_field_name(self, obj):
+        return (obj.metadata or {}).get('field_name', '')
+
+    def get_old_value(self, obj):
+        return (obj.metadata or {}).get('old_value')
+
+    def get_new_value(self, obj):
+        return (obj.metadata or {}).get('new_value')
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):

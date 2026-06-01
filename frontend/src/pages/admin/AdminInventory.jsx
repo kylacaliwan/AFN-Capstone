@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import Layout from '../../components/layout/Layout';
-import { api } from '../../api/api';
+import { api, fetchInventorySummary } from '../../api/api';
 import { FiAlertCircle, FiEdit3, FiPlus, FiRefreshCw, FiTrash2 } from 'react-icons/fi';
 
 const STATUS_OPTIONS = [
@@ -94,6 +94,8 @@ export default function AdminInventory() {
   const [editingId, setEditingId] = useState(null);
   const [editingItem, setEditingItem] = useState(buildDefaultItem());
   const [searchTerm, setSearchTerm] = useState('');
+  const [inventorySummary, setInventorySummary] = useState(null);
+  const [lowStockItems, setLowStockItems] = useState([]);
 
   const getDefaultCategoryId = (categoryList = categories) => categoryList[0]?.id || '';
 
@@ -125,22 +127,35 @@ export default function AdminInventory() {
     return extractList(data).map(normalizeInventoryItem);
   };
 
+  const loadLowStockItems = async () => {
+    const { data } = await api.get('/inventory/items/low_stock/');
+    return extractList(data).map(normalizeInventoryItem);
+  };
+
   const loadData = async () => {
     setLoading(true);
     setError('');
 
     try {
-      const categoryList = await loadCategories();
-      const items = await loadInventory();
+      const [categoryList, items, summary, lowStock] = await Promise.all([
+        loadCategories(),
+        loadInventory(),
+        fetchInventorySummary(),
+        loadLowStockItems()
+      ]);
       const defaultCategoryId = getDefaultCategoryId(categoryList);
 
       setInventory(items);
+      setInventorySummary(summary);
+      setLowStockItems(lowStock);
       setNewItem((current) => (current.category ? current : buildDefaultItem(defaultCategoryId)));
       setEditingItem((current) => (current.category ? current : buildDefaultItem(defaultCategoryId)));
     } catch (loadError) {
       setError(getApiErrorMessage(loadError, 'Failed to load inventory. Please try again.'));
       setInventory([]);
       setCategories([]);
+      setInventorySummary(null);
+      setLowStockItems([]);
     } finally {
       setLoading(false);
     }
@@ -167,6 +182,7 @@ export default function AdminInventory() {
       setNewItem(buildDefaultItem(defaultCategoryId));
       setAdding(false);
       setError('');
+      await loadData();
     } catch (addError) {
       setError(getApiErrorMessage(addError, 'Failed to add item. Please try again.'));
     }
@@ -180,6 +196,7 @@ export default function AdminInventory() {
       );
       resetEditor();
       setError('');
+      await loadData();
     } catch (updateError) {
       setError(getApiErrorMessage(updateError, 'Failed to update item. Please try again.'));
     }
@@ -190,6 +207,7 @@ export default function AdminInventory() {
       await api.delete(`/inventory/items/${id}/`);
       setInventory((current) => current.filter((item) => item.id !== id));
       setError('');
+      await loadData();
     } catch (deleteError) {
       setError(getApiErrorMessage(deleteError, 'Failed to delete item. Please try again.'));
     }
@@ -208,8 +226,9 @@ export default function AdminInventory() {
       item.status,
     ].some((value) => String(value || '').toLowerCase().includes(normalizedSearchTerm));
   });
-  const lowStockItems = inventory.filter((item) => item.is_low_stock);
   const categoryMissing = categories.length === 0;
+  const totalInventoryCount = inventorySummary?.totalItems ?? inventory.length;
+  const lowStockCount = inventorySummary?.lowStockCount ?? lowStockItems.length;
 
   return (
     <Layout>
@@ -382,12 +401,12 @@ export default function AdminInventory() {
         <div className="border-b border-slate-200 p-5">
           <h3 className="text-lg font-semibold text-slate-900">
             Stock Overview ({filteredInventory.length}
-            {filteredInventory.length !== inventory.length ? ` of ${inventory.length}` : ''} items)
+            {filteredInventory.length !== totalInventoryCount ? ` of ${totalInventoryCount}` : ''} items)
           </h3>
           <p className="mt-2 text-sm text-slate-500">
             {normalizedSearchTerm
               ? `Showing matches for "${searchTerm.trim()}".`
-              : 'Use search to quickly find inventory by item, SKU, category, or status.'}
+              : `${lowStockCount} low-stock item${lowStockCount === 1 ? '' : 's'} need attention.`}
           </p>
         </div>
         <div className="overflow-x-auto">

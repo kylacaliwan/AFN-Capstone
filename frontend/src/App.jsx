@@ -18,7 +18,9 @@ import {
   hasAnyCapability
 } from './rbac';
 
+const LandingPage = lazy(() => import('./pages/LandingPage'));
 const Login = lazy(() => import('./pages/Login'));
+const AboutPage = lazy(() => import('./pages/AboutUs'));
 const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
@@ -154,11 +156,12 @@ function AppRoutes() {
       {isAuthenticated ? <FirebaseBootstrap /> : null}
       <Suspense fallback={<div className="grid min-h-screen place-items-center text-slate-600">Loading...</div>}>
         <Routes>
-          <Route path="/" element={<RoleRedirect />} />
+          <Route path="/" element={isAuthenticated? <RoleRedirect user={user} />: <LandingPage />}/>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/about-us" element={<AboutPage />} />
 
           <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/calendar" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><AdminCalendar /></ProtectedRoute>} />

@@ -11,7 +11,6 @@ import {
   FiLayers,
   FiMapPin,
   FiPlusSquare,
-  FiRefreshCw
 } from 'react-icons/fi';
 import Layout from '../../components/layout/Layout';
 import StatsCard from '../../components/ui/StatsCard';
@@ -109,15 +108,6 @@ export default function ClientDashboard() {
               >
                 Alerts <FiBell className="h-3.5 w-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => loadDashboard({ silent: true })}
-                disabled={refreshing}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-60"
-              >
-                <FiRefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Refreshing' : 'Refresh'}
-              </button>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -175,7 +165,6 @@ export default function ClientDashboard() {
             value={overview.total_requests ?? 0}
             icon={FiClipboard}
             accent="blue"
-            trendLabel="Lifetime service requests you submitted"
           />
           <StatsCard
             title="Active requests"
@@ -183,7 +172,6 @@ export default function ClientDashboard() {
             icon={FiClock}
             accent="amber"
             color="text-amber-600"
-            trendLabel="Awaiting approval or not yet ticketed"
           />
           <StatsCard
             title="Open tickets"
@@ -191,7 +179,6 @@ export default function ClientDashboard() {
             icon={FiLayers}
             accent="sky"
             color="text-sky-600"
-            trendLabel="Jobs in the field service pipeline"
           />
           <StatsCard
             title="Completed"
@@ -199,7 +186,6 @@ export default function ClientDashboard() {
             icon={FiCheckCircle}
             accent="emerald"
             color="text-emerald-600"
-            trendLabel="Finished services on your account"
           />
         </div>
 
@@ -230,7 +216,6 @@ export default function ClientDashboard() {
                   View all <FiArrowRight className="h-3.5 w-3.5" />
                 </button>
               </div>
-              <p className="mt-0.5 text-sm text-slate-500">Waiting for approval or assignment.</p>
               <div className="mt-4 space-y-2">
                 {loading && !stats ? (
                   <div className="space-y-2">
@@ -273,7 +258,6 @@ export default function ClientDashboard() {
                 </div>
                 <h2 className="text-lg font-semibold text-slate-900">Recent history</h2>
               </div>
-              <p className="mt-1 text-sm text-slate-500">Latest completed work.</p>
               <div className="mt-4 space-y-2">
                 {loading && !stats ? (
                   <div className="space-y-2">
@@ -301,7 +285,7 @@ export default function ClientDashboard() {
                   ))
                 ) : (
                   <p className="rounded-xl border border-dashed border-surface-200 py-8 text-center text-sm text-slate-500">
-                    Completed services will show here.
+                   
                   </p>
                 )}
               </div>
@@ -310,8 +294,7 @@ export default function ClientDashboard() {
 
           <div className="space-y-6">
             <div className="card p-5">
-              <h2 className="text-lg font-semibold text-slate-900">Request & ticket pipeline</h2>
-              <p className="mt-0.5 text-sm text-slate-500">Counts by request/ticket stage.</p>
+              <h2 className="text-lg font-semibold text-slate-900">Request & ticket pipeline</h2> 
               <div className="mt-4 grid gap-2 sm:grid-cols-2">
                 {pipelineItems.map((item) => (
                   <div key={item.label} className="rounded-xl border border-surface-200 bg-surface-50 px-3 py-3">
@@ -331,7 +314,6 @@ export default function ClientDashboard() {
 
             <div className="card p-5">
               <h2 className="text-lg font-semibold text-slate-900">Live tickets</h2>
-              <p className="mt-0.5 text-sm text-slate-500">Current jobs in progress.</p>
               <div className="mt-4 space-y-2">
                 {loading && !stats ? (
                   <div className="space-y-2">
@@ -373,7 +355,6 @@ export default function ClientDashboard() {
 
             <div className="card p-5">
               <h2 className="text-lg font-semibold text-slate-900">Suggestions</h2>
-              <p className="mt-0.5 text-sm text-slate-500">Based on your account activity.</p>
               <div className="mt-4 space-y-2">
                 {recommendations.length > 0 ? (
                   recommendations.map((item) => (

@@ -3,7 +3,7 @@ Middleware to inject the current request user into thread-local storage.
 This allows the ChangeLog signals to know WHO made each change.
 """
 
-from users.signals import set_current_user
+from users.signals import set_current_request_meta, set_current_user
 
 
 class ChangeLogUserMiddleware:
@@ -21,11 +21,13 @@ class ChangeLogUserMiddleware:
             set_current_user(current_user)
         else:
             set_current_user(self._get_token_user(request))
+        set_current_request_meta(request)
 
         response = self.get_response(request)
 
         # Clear after response to avoid leaking between requests
         set_current_user(None)
+        set_current_request_meta(None)
 
         return response
 

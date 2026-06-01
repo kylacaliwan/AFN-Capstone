@@ -78,9 +78,9 @@ function AnalyticsTooltip({ active, payload, label }) {
 /* ─── Key Metrics horizontal bar chart (replaces stat cards) ─── */
 function KeyMetricsBar({ data }) {
   const items = [
-    { label: 'Total Service Requests', value: Number(data.total || 0), color: '#0ea5e9', helper: 'All customer requests in the reporting data.' },
-    { label: 'Completed Service Requests', value: Number(data.completed || 0), color: '#10b981', helper: 'Requests already closed as completed.' },
-    { label: 'Requests Pending Approval', value: Number(data.pending || 0), color: '#f59e0b', helper: 'Requests waiting for approval before ticket work starts.' },
+    { label: 'Total Service Requests', value: Number(data.total || 0), color: '#0ea5e9', helper: 'Customer requests created in the selected period.' },
+    { label: 'Completed Service Requests', value: Number(data.completed || 0), color: '#10b981', helper: 'Requests closed as completed in the selected period.' },
+    { label: 'Requests Pending Approval', value: Number(data.pending || 0), color: '#f59e0b', helper: 'Selected-period requests still waiting for approval.' },
     { label: 'Available Field Technicians', value: Number(data.technicians || 0), color: '#8b5cf6', helper: 'Technicians currently counted as active or available.' }
   ];
 
@@ -649,6 +649,8 @@ export default function AdminAnalytics() {
   const clientSchedule = Array.isArray(dashboardStats?.client_schedule) ? dashboardStats.client_schedule : [];
   const slaOverview = dashboardStats?.sla_overview || {};
   const dashOverview = dashboardStats?.overview || {};
+  const pendingApprovalsCount = Number(dashOverview.pending_approvals ?? pendingRequests.length ?? 0);
+  const scheduledJobsCount = Number(dashOverview.scheduled_jobs ?? clientSchedule.length ?? 0);
 
   /* Data for the new Key Metrics bar chart */
   const keyMetricsData = {
@@ -692,13 +694,13 @@ export default function AdminAnalytics() {
     },
     {
       label: 'Pending Approvals',
-      value: pendingRequests.length,
+      value: pendingApprovalsCount,
       color: '#0ea5e9',
       description: 'Service requests still waiting for admin or supervisor approval.'
     },
     {
       label: 'Scheduled Jobs',
-      value: clientSchedule.length,
+      value: scheduledJobsCount,
       color: '#06b6d4',
       description: 'Active tickets with a scheduled visit date on the admin board.'
     }

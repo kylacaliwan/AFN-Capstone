@@ -5,41 +5,81 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from .models import Message
 from .serializers import MessageSerializer
+from notifications.models import Notification
 from users.models import User
 
 
 STAFF_MESSAGE_ROLES = {'superadmin', 'admin', 'technician'}
+ADMIN_MESSAGE_ROLES = {'superadmin', 'admin'}
+
+
+def notify_admins_of_client_ticket_message(message):
+    ticket = message.ticket
+    sender = message.sender
+    if not ticket or not sender or getattr(sender, 'role', None) != 'client':
+        return
+
+    client_name = sender.get_full_name().strip() or sender.username
+    recipients = User.objects.filter(role__in=ADMIN_MESSAGE_ROLES, is_active=True).exclude(id=sender.id)
+    for recipient in recipients:
+        Notification.objects.create(
+            user=recipient,
+            ticket=ticket,
+            request=ticket.request,
+            title='New after-sales message',
+            message=f'{client_name} sent an after-sales message for ticket #{ticket.id}.',
+            type='customer_inquiry',
+        )
 
 class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
-        if getattr(request.user, 'role', None) not in STAFF_MESSAGE_ROLES:
-            raise PermissionDenied('Only admins, superadmins, and technicians can send staff messages.')
+        if getattr(request.user, 'role', None) not in STAFF_MESSAGE_ROLES | {'client'}:
+            raise PermissionDenied('Only service participants can send messages.')
+        if getattr(request.user, 'role', None) == 'client' and not request.data.get('ticket'):
+            raise PermissionDenied('Clients can only send ticket messages.')
         return super().create(request, *args, **kwargs)
 
     def get_queryset(self):
         user = self.request.user
-        if getattr(user, 'role', None) not in STAFF_MESSAGE_ROLES:
+        role = getattr(user, 'role', None)
+
+        if role == 'client':
+            base_q = Q(ticket__request__client=user)
+        elif role in ADMIN_MESSAGE_ROLES:
+            base_q = (
+                Q(room_type='group', group_key='staff') |
+                Q(room_type='direct', sender=user) |
+                Q(room_type='direct', receiver=user) |
+                Q(ticket__isnull=False)
+            )
+        elif role == 'technician':
+            base_q = (
+                Q(room_type='group', group_key='staff') |
+                Q(room_type='direct', sender=user) |
+                Q(room_type='direct', receiver=user) |
+                Q(ticket__technician=user) |
+                Q(ticket__supervisor=user) |
+                Q(ticket__crew_assignments__technician=user)
+            )
+        else:
             return Message.objects.none()
 
         return Message.objects.filter(
-            Q(room_type='group', group_key='staff') |
-            Q(room_type='direct', sender=user) |
-            Q(room_type='direct', receiver=user)
+            base_q
         ).select_related(
             'sender',
             'receiver',
             'ticket',
             'ticket__request',
             'ticket__request__location',
-        ).order_by('-created_at')
+        ).distinct().order_by('-created_at')
 
     def perform_create(self, serializer):
-        if getattr(self.request.user, 'role', None) not in STAFF_MESSAGE_ROLES:
-            raise PermissionDenied('Only admins, superadmins, and technicians can send staff messages.')
-        serializer.save(sender=self.request.user)
+        message = serializer.save(sender=self.request.user)
+        notify_admins_of_client_ticket_message(message)
 
     @action(detail=False, methods=['get'])
     def participants(self, request):

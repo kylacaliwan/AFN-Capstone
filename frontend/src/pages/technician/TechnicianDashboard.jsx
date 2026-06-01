@@ -12,7 +12,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/layout/Layout';
 import StatsCard from '../../components/ui/StatsCard';
-import { fetchNotifications, fetchTechnicianDashboard, updateJobStatus, updateTechnicianLocation } from '../../api/api';
+import { fetchNotifications, fetchTechnicianDashboard, getUnreadNotificationCount, updateJobStatus, updateTechnicianLocation } from '../../api/api';
 import { useGPSTracking } from '../../hooks/useGPSTracking';
 import GPSStatusIndicator from '../../components/ui/GPSStatusIndicator';
 import { AUTO_REFRESH_MS, formatDateTime } from '../../utils/dashboardHelpers';
@@ -67,10 +67,16 @@ const formatNotificationTime = (value) => {
   return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
+const toFiniteNumber = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
 export default function TechnicianDashboard() {
   const { user } = useAuth();
   const [dashboard, setDashboard] = useState(EMPTY_DASHBOARD);
   const [notifications, setNotifications] = useState([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -93,15 +99,21 @@ export default function TechnicianDashboard() {
     if (silent) setRefreshing(true);
     else setLoading(true);
     try {
-      const [dData, nData] = await Promise.all([fetchTechnicianDashboard(techName), fetchNotifications()]);
+      const [dData, nData, unreadCount] = await Promise.all([
+        fetchTechnicianDashboard(techName),
+        fetchNotifications(),
+        getUnreadNotificationCount()
+      ]);
       const sorted = [...nData].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       setDashboard(dData || EMPTY_DASHBOARD);
       setNotifications(sorted.slice(0, 5));
+      setUnreadNotificationCount(unreadCount || 0);
       setLastUpdated(new Date().toISOString());
       setError('');
     } catch (err) {
       setDashboard(EMPTY_DASHBOARD);
       setNotifications([]);
+      setUnreadNotificationCount(0);
       setError(err.message || 'Unable to load technician dashboard.');
     } finally {
       setLoading(false);
@@ -118,7 +130,6 @@ export default function TechnicianDashboard() {
   const todaysSchedule = Array.isArray(dashboard.todays_schedule) ? dashboard.todays_schedule : [];
   const activeJobs = Array.isArray(dashboard.active_jobs) ? dashboard.active_jobs : [];
   const recentActivity = Array.isArray(dashboard.recent_activity) ? dashboard.recent_activity : [];
-  const unreadNotifications = notifications.filter((i) => i.status === 'unread').length;
 
   const canOpenJobs = hasAnyCapability(user, TECHNICIAN_JOBS_CAPABILITIES);
   const canOpenSchedule = hasAnyCapability(user, TECHNICIAN_SCHEDULE_CAPABILITIES);
@@ -147,8 +158,8 @@ export default function TechnicianDashboard() {
     }
   };
 
-  const gpsLatitude = location?.latitude ?? Number(dashboard.technician?.current_location?.latitude);
-  const gpsLongitude = location?.longitude ?? Number(dashboard.technician?.current_location?.longitude);
+  const gpsLatitude = toFiniteNumber(location?.latitude ?? dashboard.technician?.current_location?.latitude);
+  const gpsLongitude = toFiniteNumber(location?.longitude ?? dashboard.technician?.current_location?.longitude);
   const gpsAccuracy = location?.accuracy;
 
   return (
@@ -181,7 +192,7 @@ export default function TechnicianDashboard() {
         <StatsCard title="Today's Jobs" value={todaysSchedule.length} color="text-brand-600" icon={FiCalendar} accent="blue" />
         <StatsCard title="Active Jobs" value={dashboard.stats?.active_jobs || 0} color="text-orange-600" icon={FiClipboard} accent="orange" />
         <StatsCard title="Completed Today" value={dashboard.stats?.completed_today || 0} color="text-emerald-600" icon={FiCheckSquare} accent="emerald" />
-        <StatsCard title="Unread Alerts" value={unreadNotifications} color="text-rose-600" icon={FiBell} accent="rose" />
+        <StatsCard title="Unread Alerts" value={unreadNotificationCount} color="text-rose-600" icon={FiBell} accent="rose" />
       </div>
 
       {/* Current Focus + GPS */}
@@ -312,7 +323,7 @@ export default function TechnicianDashboard() {
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100">Coordinates</p>
               <p className="mt-1 text-sm font-medium">
-                {Number.isFinite(gpsLatitude) && Number.isFinite(gpsLongitude) ? `${gpsLatitude.toFixed(6)}, ${gpsLongitude.toFixed(6)}` : 'Waiting for GPS fix'}
+                {gpsLatitude !== null && gpsLongitude !== null ? `${gpsLatitude.toFixed(6)}, ${gpsLongitude.toFixed(6)}` : 'Waiting for GPS fix'}
               </p>
             </div>
             {gpsError && (

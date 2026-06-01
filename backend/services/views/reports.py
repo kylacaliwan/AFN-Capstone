@@ -2,6 +2,18 @@
 from services.views.helpers import *  # noqa: F401,F403
 from django.db.models import Prefetch
 
+
+def _bounded_days(request, default=30, minimum=1, maximum=365):
+    try:
+        days = int(request.query_params.get('days', default))
+    except (TypeError, ValueError):
+        days = default
+    return max(minimum, min(maximum, days))
+
+
+def _period_start(days):
+    return timezone.now().date() - timezone.timedelta(days=days - 1)
+
 class StatusReportsViewSet(viewsets.ViewSet):
     """Status reports for various operational aspects"""
     permission_classes = [IsAdminOrSupervisor]
@@ -9,8 +21,8 @@ class StatusReportsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def scheduling_dispatch_report(self, request):
         """Report on scheduling and dispatching efficiency with completion progress"""
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now().date() - timezone.timedelta(days=days)
+        days = _bounded_days(request)
+        start_date = _period_start(days)
 
         # Ticket scheduling metrics
         total_tickets = ServiceTicket.objects.filter(
@@ -106,8 +118,8 @@ class StatusReportsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def workflow_checklist_report(self, request):
         """Report on workflow compliance and checklist usage with completion progress"""
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now().date() - timezone.timedelta(days=days)
+        days = _bounded_days(request)
+        start_date = _period_start(days)
 
         # Checklist completion rates
         total_tickets = ServiceTicket.objects.filter(
@@ -291,8 +303,8 @@ class StatusReportsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def communication_report(self, request):
         """Report on communication effectiveness and customer visibility with completion progress"""
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now().date() - timezone.timedelta(days=days)
+        days = _bounded_days(request)
+        start_date = _period_start(days)
 
         # Service request updates
         total_requests = ServiceRequest.objects.filter(
@@ -395,8 +407,8 @@ class StatusReportsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def performance_monitoring_report(self, request):
         """Report on key performance indicators and metrics with completion progress"""
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now().date() - timezone.timedelta(days=days)
+        days = _bounded_days(request)
+        start_date = _period_start(days)
 
         # Service completion metrics
         total_tickets = ServiceTicket.objects.filter(
@@ -510,8 +522,8 @@ class StatusReportsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def safety_compliance_report(self, request):
         """Report on safety compliance and regulatory adherence with completion progress"""
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now().date() - timezone.timedelta(days=days)
+        days = _bounded_days(request)
+        start_date = _period_start(days)
 
         # Inspection checklist safety data
         total_inspections = InspectionChecklist.objects.filter(
@@ -892,7 +904,7 @@ class CoverageHeatmapViewSet(viewsets.ViewSet):
         # Filters
         days = request.query_params.get('days')
         if days:
-            start_date = timezone.now().date() - timezone.timedelta(days=int(days))
+            start_date = _period_start(_bounded_days(request))
             tickets = tickets.filter(
                 Q(completed_date__date__gte=start_date) | Q(scheduled_date__gte=start_date)
             )

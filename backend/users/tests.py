@@ -720,6 +720,33 @@ class AdminAnalyticsTests(APITestCase):
         self.assertTrue(any(item['city'] == 'Lagos' for item in response.data['cityCompletionTrends']))
         self.assertTrue(any(item['province'] == 'Lagos' for item in response.data['provinceCompletionTrends']))
 
+    def test_admin_analytics_period_changes_overview_and_service_counts(self):
+        weekly_response = self.client.get('/api/admin/analytics/?days=7')
+        yearly_response = self.client.get('/api/admin/analytics/?days=365')
+
+        self.assertEqual(weekly_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(yearly_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(weekly_response.data['analyticsPeriodDays'], 7)
+        self.assertEqual(yearly_response.data['analyticsPeriodDays'], 365)
+        self.assertEqual(weekly_response.data['overview']['totalRequests'], 3)
+        self.assertEqual(weekly_response.data['overview']['completedRequests'], 2)
+        self.assertEqual(yearly_response.data['overview']['totalRequests'], 5)
+        self.assertEqual(yearly_response.data['overview']['completedRequests'], 3)
+
+        weekly_services = {
+            item['serviceType']: item['requestCount']
+            for item in weekly_response.data['topRequestedServiceTypes']
+        }
+        yearly_services = {
+            item['serviceType']: item['requestCount']
+            for item in yearly_response.data['topRequestedServiceTypes']
+        }
+
+        self.assertEqual(weekly_services[self.solar.name], 2)
+        self.assertEqual(weekly_services[self.cctv.name], 1)
+        self.assertEqual(yearly_services[self.solar.name], 3)
+        self.assertEqual(yearly_services[self.cctv.name], 2)
+
     def test_admin_analytics_counts_only_available_technicians_in_overview(self):
         User.objects.create_user(
             username='offline_analytics_tech',

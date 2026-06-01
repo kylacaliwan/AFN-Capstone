@@ -352,20 +352,24 @@ class DashboardView(APIView):
         ).order_by('-request_date')[:5]
 
         # Client schedule for upcoming assignment tasks - load all relationships
-        client_schedule_tickets = ServiceTicket.objects.select_related(
+        client_schedule_queryset = ServiceTicket.objects.select_related(
             'request', 'request__client', 'request__service_type', 'technician'
         ).filter(
             status__in=['Not Started', 'In Progress'],
             scheduled_date__isnull=False
-        ).order_by('scheduled_date', 'scheduled_time')[:20]
+        )
+        client_schedule_count = client_schedule_queryset.count()
+        client_schedule_tickets = client_schedule_queryset.order_by('scheduled_date', 'scheduled_time')[:20]
         sla_service_tickets = ServiceTicket.objects.select_related(
             'request', 'request__client', 'request__service_type', 'technician'
         ).filter(status__in=['Not Started', 'In Progress'])
 
         # Pending requests from clients (new)
-        pending_requests = ServiceRequest.objects.select_related(
+        pending_requests_queryset = ServiceRequest.objects.select_related(
             'client', 'service_type'
-        ).filter(status='Pending').order_by('request_date')[:10]
+        ).filter(status='Pending')
+        pending_requests_count = pending_requests_queryset.count()
+        pending_requests = pending_requests_queryset.order_by('request_date')[:10]
         sla_service_requests = ServiceRequest.objects.select_related(
             'client', 'service_type'
         ).filter(status='Pending')
@@ -434,8 +438,8 @@ class DashboardView(APIView):
                 'active_technicians': active_technicians,
                 'due_soon_maintenance': active_maintenance.filter(status='due_soon').count(),
                 'due_maintenance': active_maintenance.filter(status='due').count(),
-                'pending_approvals': pending_requests.count(),
-                'scheduled_jobs': client_schedule_tickets.count(),
+                'pending_approvals': pending_requests_count,
+                'scheduled_jobs': client_schedule_count,
                 # After-sales metrics
                 'total_cases': cases.count(),
                 'open_cases': unresolved_cases.count(),
@@ -448,8 +452,8 @@ class DashboardView(APIView):
                 'available_technicians': sum(1 for technician in technician_stats if technician.get('status') == 'active'),
             },
             'list_counts': {
-                'pending_requests': pending_requests.count(),
-                'client_schedule': client_schedule_tickets.count(),
+                'pending_requests': pending_requests_count,
+                'client_schedule': client_schedule_count,
                 'sla_queue': len(sla_queue),
             },
             'sla_overview': sla_overview,

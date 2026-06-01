@@ -136,11 +136,7 @@ export default function ClientServiceHistory() {
   return (
     <Layout>
       <div className="space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Service History</h1>
-          <p className="mt-2 text-slate-600">View your completed services and manage ratings</p>
-        </div>
+        
 
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4">

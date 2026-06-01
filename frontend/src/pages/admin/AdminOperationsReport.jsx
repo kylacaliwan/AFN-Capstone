@@ -64,7 +64,7 @@ export default function AdminOperationsReport() {
   const fetchOperationsTickets = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/progress/ticket-progress/report/');
+      const response = await api.get('/services/service-tickets/report/');
       setTickets(response.data || []);
       setError('');
     } catch (err) {
@@ -75,21 +75,11 @@ export default function AdminOperationsReport() {
     }
   };
 
-  // Calculate summary stats
-  const summaryStats = useMemo(() => {
-    const total = tickets.length;
-    const completed = tickets.filter(t => normalizeReportValue(t.status) === 'completed').length;
-    const pending = tickets.filter(t => ['not started', 'in progress', 'pending'].includes(normalizeReportValue(t.status))).length;
-    const unassigned = tickets.filter(t => !t.technician_id).length;
-
-    return { total, completed, pending, unassigned };
-  }, [tickets]);
-
   // Filter tickets
   const filteredTickets = useMemo(() => {
     return tickets.filter(ticket => {
       // Date range filter
-      const reportDate = ticket.updated_at ? new Date(ticket.updated_at) : null;
+      const reportDate = ticket.updated_at || ticket.created_at ? new Date(ticket.updated_at || ticket.created_at) : null;
       if (dateFrom && (!reportDate || reportDate < new Date(dateFrom))) return false;
       if (dateTo && (!reportDate || reportDate > new Date(dateTo + 'T23:59:59'))) return false;
 
@@ -113,6 +103,16 @@ export default function AdminOperationsReport() {
       return true;
     });
   }, [tickets, dateFrom, dateTo, statusFilter, priorityFilter, searchTerm]);
+
+  // Calculate summary stats from the same rows shown/exported by the report.
+  const summaryStats = useMemo(() => {
+    const total = filteredTickets.length;
+    const completed = filteredTickets.filter(t => normalizeReportValue(t.status) === 'completed').length;
+    const pending = filteredTickets.filter(t => ['not started', 'in progress', 'pending'].includes(normalizeReportValue(t.status))).length;
+    const unassigned = filteredTickets.filter(t => !t.technician_id).length;
+
+    return { total, completed, pending, unassigned };
+  }, [filteredTickets]);
 
   const resetFilters = () => {
     setDateFrom('');

@@ -125,8 +125,7 @@ class Command(BaseCommand):
                 # Rework rate (tickets with revisits/complaints)
                 rework_tickets = 0
                 for ticket in completed_tickets:
-                    # Check if there's a follow-up case
-                    if hasattr(ticket, 'afterSalesCase'):
+                    if ticket.after_sales_cases.exists():
                         rework_tickets += 1
 
                 rework_rate = (
@@ -165,13 +164,13 @@ class Command(BaseCommand):
 
                 if tickets_assigned > 0:
                     self.stdout.write(
-                        f"✓ {technician.username}: {tickets_completed}/{tickets_assigned} completed, "
+                        f"{technician.username}: {tickets_completed}/{tickets_assigned} completed, "
                         f"satisfaction {customer_satisfaction:.1f}/5"
                     )
 
             except Exception as e:
                 self.stdout.write(
                     self.style.ERROR(
-                        f"✗ Error generating metrics for {technician.username}: {str(e)}"
+                        f"Error generating metrics for {technician.username}: {str(e)}"
                     )
                 )

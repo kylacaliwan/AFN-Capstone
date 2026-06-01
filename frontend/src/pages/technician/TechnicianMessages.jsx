@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/layout/Layout';
 import { fetchMessageParticipants, fetchMessages, sendMessage } from '../../api/api';
 import { FiRefreshCw, FiSend, FiUsers } from 'react-icons/fi';
+import { formatTicketId } from '../../utils/roleIds';
 
 const STAFF_GROUP_ROOM = {
   key: 'group:staff',
@@ -44,6 +45,14 @@ const getRoomKeyForMessage = (message, currentUserId) => {
   return `direct:${partnerId}`;
 };
 
+const getGroupRoomName = (message) => {
+  if (message.groupKey === 'staff') return 'Staff Group Chat';
+  if (message.groupKey?.startsWith('after_sales_ticket_')) {
+    return `After-sales ${formatTicketId(message.ticketId)}`;
+  }
+  return message.groupKey || 'Group Chat';
+};
+
 export default function TechnicianMessages() {
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
@@ -65,8 +74,25 @@ export default function TechnicianMessages() {
       subtitle: roleLabel(participant.role),
       avatar: initials(participant.name || participant.username),
     }));
+    const groupRooms = messages
+      .filter((message) => message.roomType === 'group' && message.groupKey && message.groupKey !== 'staff')
+      .reduce((roomsByKey, message) => {
+        const key = `group:${message.groupKey}`;
+        if (!roomsByKey.has(key)) {
+          roomsByKey.set(key, {
+            key,
+            roomType: 'group',
+            groupKey: message.groupKey,
+            ticketId: message.ticketId,
+            name: getGroupRoomName(message),
+            subtitle: message.ticketAddress || 'Ticket conversation',
+            avatar: 'AS',
+          });
+        }
+        return roomsByKey;
+      }, new Map());
 
-    const allRooms = [STAFF_GROUP_ROOM, ...directRooms];
+    const allRooms = [STAFF_GROUP_ROOM, ...Array.from(groupRooms.values()), ...directRooms];
 
     return allRooms.map((room) => {
       const roomMessages = messages.filter((message) => getRoomKeyForMessage(message, user?.id) === room.key);
@@ -134,6 +160,7 @@ export default function TechnicianMessages() {
         roomType: activeRoom.roomType,
         groupKey: activeRoom.groupKey,
         receiverId: activeRoom.participantId,
+        ticketId: activeRoom.ticketId,
         text: newMessage,
       });
       setMessages((previousMessages) => [...previousMessages, sentMessage]);

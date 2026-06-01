@@ -127,6 +127,59 @@ class ServiceTicketViewSet(viewsets.ModelViewSet):
 
         return get_visible_service_tickets_queryset(self.request.user, base_queryset=base_queryset)
 
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Return stable ticket counts for cards that must not depend on paginated rows."""
+        queryset = self.get_queryset()
+        tickets = list(queryset)
+        active_tickets = [
+            ticket for ticket in tickets
+            if ticket.status not in ['Completed', 'Cancelled']
+        ]
+        dispatchable_tickets = [
+            ticket for ticket in active_tickets
+            if ticket.technician_id is None and ticket.status in ['Not Started', 'On Hold']
+        ]
+        assigned_active_tickets = [
+            ticket for ticket in active_tickets
+            if ticket.technician_id is not None
+        ]
+
+        missed_dispatch_count = 0
+        warning_count = 0
+        overdue_count = 0
+
+        now = timezone.now()
+        for ticket in active_tickets:
+            try:
+                if get_ticket_dispatch_state(ticket).get('is_missed_dispatch'):
+                    missed_dispatch_count += 1
+            except Exception:
+                logger.exception('Failed to evaluate dispatch state for ticket %s', ticket.id)
+
+            try:
+                sla_state = evaluate_service_ticket_sla(ticket, now=now).get('state')
+                if sla_state == 'warning':
+                    warning_count += 1
+                elif sla_state == 'overdue':
+                    overdue_count += 1
+            except Exception:
+                logger.exception('Failed to evaluate SLA state for ticket %s', ticket.id)
+
+        return Response({
+            'total_tickets': len(tickets),
+            'active_queue': len(active_tickets),
+            'completed': sum(1 for ticket in tickets if ticket.status == 'Completed'),
+            'cancelled': sum(1 for ticket in tickets if ticket.status == 'Cancelled'),
+            'unassigned_active': sum(1 for ticket in active_tickets if ticket.technician_id is None),
+            'dispatchable': len(dispatchable_tickets),
+            'assigned_active': len(assigned_active_tickets),
+            'missed_dispatch': missed_dispatch_count,
+            'sla_warning': warning_count,
+            'sla_overdue': overdue_count,
+            'sla_risk': warning_count + overdue_count,
+        })
+
     @action(detail=True, methods=['post'])
     def assign(self, request, pk=None):
         """

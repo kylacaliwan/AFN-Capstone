@@ -72,12 +72,12 @@ class Command(BaseCommand):
         try:
             analytics = viewset._generate_daily_analytics(target_date)
             self.stdout.write(
-                f"✓ Generated analytics for {target_date}: "
+                f"Generated analytics for {target_date}: "
                 f"{analytics.total_requests} requests, "
                 f"avg response time {analytics.avg_response_time_hours}h, "
                 f"satisfaction {analytics.satisfaction_score}/5"
             )
         except Exception as e:
             self.stdout.write(
-                self.style.ERROR(f"✗ Error generating analytics for {target_date}: {str(e)}")
+                self.style.ERROR(f"Error generating analytics for {target_date}: {str(e)}")
             )

@@ -121,9 +121,7 @@ export default function ClientNotifications() {
         <div className="mx-auto max-w-3xl">
           <div className="mb-6 flex items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900">Notifications</h1>
-              <p className="mt-1 text-slate-600">Stay updated on your service requests and appointments.</p>
-            </div>
+              </div>
             {unreadCount > 0 && (
               <button
                 onClick={handleMarkAllAsRead}

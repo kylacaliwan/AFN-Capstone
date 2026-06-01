@@ -697,7 +697,7 @@ class ServiceTicketReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = ServiceTicket
         fields = [
-            'id', 'created_at', 'client', 'client_fullname', 'service', 'priority', 'status',
+            'id', 'created_at', 'updated_at', 'client', 'client_fullname', 'service', 'priority', 'status',
             'sla', 'dispatch_status', 'dispatch_label', 'dispatch_action', 'is_missed_dispatch',
             'missed_dispatch_at', 'dispatch_overdue_days', 'technician_id', 'technician_fullname',
             'next_step',

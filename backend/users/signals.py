@@ -52,9 +52,27 @@ def set_current_user(user):
     _thread_locals.user = user
 
 
+def set_current_request_meta(request):
+    """Store request metadata for activity logs without passing request around."""
+    if request is None:
+        _thread_locals.request_meta = {}
+        return
+
+    forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR', '')
+    ip_address = forwarded_for.split(',')[0].strip() if forwarded_for else request.META.get('REMOTE_ADDR')
+    _thread_locals.request_meta = {
+        'ip_address': ip_address or None,
+        'user_agent': request.META.get('HTTP_USER_AGENT', ''),
+    }
+
+
 def get_current_user():
     """Get the user set by middleware, or None."""
     return getattr(_thread_locals, 'user', None)
+
+
+def get_current_request_meta():
+    return getattr(_thread_locals, 'request_meta', {}) or {}
 
 
 # Fields to track on each model (only these will be logged on update)
@@ -82,6 +100,105 @@ def _get_tracked_fields(instance):
 def _should_track(instance):
     """Check if this model instance should be tracked."""
     return instance.__class__.__name__ in TRACKED_FIELDS
+
+
+ACTIVITY_CATEGORIES = {
+    'User': 'users',
+    'TechnicianProfile': 'users',
+    'ServiceType': 'settings',
+    'ServiceRequest': 'requests',
+    'ServiceTicket': 'tickets',
+    'AfterSalesCase': 'communication',
+    'MaintenanceSchedule': 'tickets',
+    'InventoryItem': 'inventory',
+    'InventoryReservation': 'inventory',
+    'InventoryTransaction': 'inventory',
+    'ServiceTypeInventoryRequirement': 'inventory',
+}
+
+
+ACTION_LABELS = {
+    'create': 'created',
+    'update': 'updated',
+    'delete': 'deleted',
+}
+
+
+def _actor_label(user):
+    if not user:
+        return 'System'
+    return user.get_full_name().strip() or user.username
+
+
+def _target_label(instance):
+    try:
+        return str(instance)
+    except Exception:
+        return f'{instance.__class__.__name__} #{instance.pk}'
+
+
+def log_activity(*, actor=None, category='system', action='system', target=None, message='', metadata=None):
+    """Create a readable operational log row for admin/superadmin activity feeds."""
+    from users.models import ActivityLog
+
+    request_meta = get_current_request_meta()
+    actor = actor or get_current_user()
+    target_model = ''
+    target_app_label = ''
+    target_id = None
+    target_label = ''
+
+    if target is not None:
+        meta = target._meta
+        target_model = meta.model_name
+        target_app_label = meta.app_label
+        target_id = target.pk
+        target_label = _target_label(target)
+
+    ActivityLog.objects.create(
+        actor=actor if getattr(actor, 'is_authenticated', False) else None,
+        actor_role=getattr(actor, 'role', '') if actor else '',
+        category=category,
+        action=action,
+        target_app_label=target_app_label,
+        target_model=target_model,
+        target_id=target_id,
+        target_label=target_label,
+        message=message[:255],
+        metadata=metadata or {},
+        ip_address=request_meta.get('ip_address'),
+        user_agent=request_meta.get('user_agent', ''),
+    )
+
+
+def _write_activity_from_change(instance, action, *, field_name='', old_value=None, new_value=None):
+    actor = get_current_user()
+    model_name = instance.__class__.__name__
+    category = ACTIVITY_CATEGORIES.get(model_name, 'system')
+    actor_name = _actor_label(actor)
+    action_label = ACTION_LABELS.get(action, action)
+    target_label = _target_label(instance)
+
+    if action == 'update' and field_name:
+        message = f'{actor_name} updated {model_name} #{instance.pk}: {field_name}'
+    else:
+        message = f'{actor_name} {action_label} {target_label}'
+
+    try:
+        log_activity(
+            actor=actor,
+            category=category,
+            action=action,
+            target=instance,
+            message=message,
+            metadata={
+                'field_name': field_name,
+                'old_value': old_value,
+                'new_value': new_value,
+            },
+        )
+    except Exception as e:
+        logger.warning(f'ActivityLog {action} failed: {e}')
 
 
 # ── Pre-save: capture old values ──────────────────────────────────────
@@ -129,6 +246,7 @@ def changelog_post_save(sender, instance, created, **kwargs):
                 changed_by=user,
                 summary=f'Created {sender.__name__} #{instance.pk}',
             )
+            _write_activity_from_change(instance, 'create', new_value=str(instance))
         except Exception as e:
             logger.warning(f'ChangeLog create failed: {e}')
     else:
@@ -148,6 +266,13 @@ def changelog_post_save(sender, instance, created, **kwargs):
                         new_value=new_val,
                         changed_by=user,
                         summary=f'{sender.__name__} #{instance.pk}: {field} changed from "{old_val}" to "{new_val}"',
+                    )
+                    _write_activity_from_change(
+                        instance,
+                        'update',
+                        field_name=field,
+                        old_value=old_val,
+                        new_value=new_val,
                     )
                 except Exception as e:
                     logger.warning(f'ChangeLog update failed: {e}')
@@ -181,5 +306,6 @@ def changelog_pre_delete(sender, instance, **kwargs):
             changed_by=user,
             summary=f'Deleted {sender.__name__} #{instance.pk}: {instance}',
         )
+        _write_activity_from_change(instance, 'delete', old_value=str(instance))
     except Exception as e:
         logger.warning(f'ChangeLog delete failed: {e}')

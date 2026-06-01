@@ -9,6 +9,7 @@ import {
   autoAssignTechnician,
   fetchAdminTechnicians,
   fetchServiceInventoryRequirements,
+  fetchServiceTicketSummary,
   fetchServiceTypes,
   fetchServiceTickets
 } from '../../api/api';
@@ -78,25 +79,29 @@ export default function AdminDispatchBoard() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [assignmentInsight, setAssignmentInsight] = useState('');
+  const [ticketSummary, setTicketSummary] = useState(null);
 
   const loadData = async () => {
     try {
-      const [ticketData, technicianData, requirementData] = await Promise.all([
+      const [ticketData, technicianData, requirementData, summaryData] = await Promise.all([
         fetchServiceTickets(),
         fetchAdminTechnicians(),
-        fetchServiceInventoryRequirements()
+        fetchServiceInventoryRequirements(),
+        fetchServiceTicketSummary()
       ]);
       const serviceTypeData = await fetchServiceTypes();
       setTickets(ticketData);
       setTechnicians(technicianData);
       setServiceTypes(serviceTypeData);
       setMaterialTemplates(requirementData);
+      setTicketSummary(summaryData);
       setError('');
     } catch (err) {
       setTickets([]);
       setTechnicians([]);
       setServiceTypes([]);
       setMaterialTemplates([]);
+      setTicketSummary(null);
       setError(err.message || 'Unable to load dispatch data.');
     }
   };
@@ -230,6 +235,11 @@ export default function AdminDispatchBoard() {
   const selectedTicketReservations = Array.isArray(selectedTicket?.inventoryReservations)
     ? selectedTicket.inventoryReservations
     : [];
+  const totalTicketsCount = ticketSummary?.totalTickets ?? tickets.length;
+  const unassignedActiveCount = ticketSummary?.unassignedActive ?? tickets.filter((ticket) => !ticket.assignedTech && !['completed', 'cancelled'].includes(ticket.status)).length;
+  const missedDispatchCount = ticketSummary?.missedDispatch ?? missedDispatchTickets.length;
+  const dispatchableCount = ticketSummary?.dispatchable ?? dispatchableTickets.length;
+  const assignedActiveCount = ticketSummary?.assignedActive ?? assignedTickets.length;
 
   return (
     <Layout>
@@ -490,23 +500,23 @@ export default function AdminDispatchBoard() {
           <div className="space-y-2">
             <div className="flex justify-between rounded border border-slate-200 bg-white p-2">
               <span className="font-medium">Total Service Tickets</span>
-              <span className="text-lg font-bold text-blue-600">{tickets.length}</span>
+              <span className="text-lg font-bold text-blue-600">{totalTicketsCount}</span>
             </div>
             <div className="flex justify-between rounded border border-slate-200 bg-white p-2">
-              <span className="font-medium">Unassigned Tickets</span>
-              <span className="text-lg font-bold text-red-600">{tickets.filter((ticket) => !ticket.assignedTech).length}</span>
+              <span className="font-medium">Unassigned Active Tickets</span>
+              <span className="text-lg font-bold text-red-600">{unassignedActiveCount}</span>
             </div>
             <div className="flex justify-between rounded border border-slate-200 bg-white p-2">
               <span className="font-medium">Missed Dispatch</span>
-              <span className="text-lg font-bold text-rose-600">{missedDispatchTickets.length}</span>
+              <span className="text-lg font-bold text-rose-600">{missedDispatchCount}</span>
             </div>
             <div className="flex justify-between rounded border border-slate-200 bg-white p-2">
               <span className="font-medium">Ready for Dispatch Tickets</span>
-              <span className="text-lg font-bold text-blue-600">{dispatchableTickets.length}</span>
+              <span className="text-lg font-bold text-blue-600">{dispatchableCount}</span>
             </div>
             <div className="flex justify-between rounded border border-slate-200 bg-white p-2">
               <span className="font-medium">Assigned Active Tickets</span>
-              <span className="text-lg font-bold text-emerald-600">{assignedTickets.length}</span>
+              <span className="text-lg font-bold text-emerald-600">{assignedActiveCount}</span>
             </div>
             <div className="flex justify-between rounded border border-slate-200 bg-white p-2">
               <span className="font-medium">Matching Active Technicians</span>

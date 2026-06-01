@@ -76,16 +76,6 @@ export default function AdminReports() {
     }
   };
 
-  // Calculate summary stats
-  const summaryStats = useMemo(() => {
-    const total = tickets.length;
-    const completed = tickets.filter(t => normalizeReportValue(t.status) === 'completed').length;
-    const pending = tickets.filter(t => ['not started', 'in progress', 'pending'].includes(normalizeReportValue(t.status))).length;
-    const unassigned = tickets.filter(t => !t.technician_id).length;
-
-    return { total, completed, pending, unassigned };
-  }, [tickets]);
-
   // Filter tickets
   const filteredTickets = useMemo(() => {
     return tickets.filter(ticket => {
@@ -113,6 +103,16 @@ export default function AdminReports() {
       return true;
     });
   }, [tickets, dateFrom, dateTo, statusFilter, priorityFilter, searchTerm]);
+
+  // Calculate summary stats from the same rows shown/exported by the report.
+  const summaryStats = useMemo(() => {
+    const total = filteredTickets.length;
+    const completed = filteredTickets.filter(t => normalizeReportValue(t.status) === 'completed').length;
+    const pending = filteredTickets.filter(t => ['not started', 'in progress', 'pending'].includes(normalizeReportValue(t.status))).length;
+    const unassigned = filteredTickets.filter(t => !t.technician_id).length;
+
+    return { total, completed, pending, unassigned };
+  }, [filteredTickets]);
 
   const resetFilters = () => {
     setDateFrom('');

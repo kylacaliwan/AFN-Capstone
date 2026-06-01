@@ -328,6 +328,70 @@ class AdminSettings(models.Model):
         return 'Admin Settings'
 
 
+class ActivityLog(models.Model):
+    """Admin-facing operational activity timeline."""
+
+    CATEGORY_CHOICES = [
+        ('security', 'Security'),
+        ('users', 'Users'),
+        ('requests', 'Requests'),
+        ('tickets', 'Tickets'),
+        ('inventory', 'Inventory'),
+        ('settings', 'Settings'),
+        ('sla', 'SLA'),
+        ('communication', 'Communication'),
+        ('system', 'System'),
+    ]
+
+    ACTION_CHOICES = [
+        ('login', 'Login'),
+        ('logout', 'Logout'),
+        ('create', 'Create'),
+        ('update', 'Update'),
+        ('delete', 'Delete'),
+        ('assign', 'Assign'),
+        ('reschedule', 'Reschedule'),
+        ('complete', 'Complete'),
+        ('cancel', 'Cancel'),
+        ('error', 'Error'),
+        ('system', 'System'),
+    ]
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='activity_logs',
+    )
+    actor_role = models.CharField(max_length=20, blank=True, default='')
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='system')
+    action = models.CharField(max_length=30, choices=ACTION_CHOICES)
+    target_app_label = models.CharField(max_length=100, blank=True, default='')
+    target_model = models.CharField(max_length=100, blank=True, default='')
+    target_id = models.PositiveIntegerField(null=True, blank=True)
+    target_label = models.CharField(max_length=255, blank=True, default='')
+    message = models.CharField(max_length=255)
+    metadata = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Activity Log'
+        verbose_name_plural = 'Activity Logs'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['category', 'created_at'], name='activity_category_time_idx'),
+            models.Index(fields=['action', 'created_at'], name='activity_action_time_idx'),
+            models.Index(fields=['target_model', 'target_id'], name='activity_target_idx'),
+            models.Index(fields=['actor', 'created_at'], name='activity_actor_time_idx'),
+        ]
+
+    def __str__(self):
+        return self.message
+
+
 class ChangeLog(models.Model):
     """
     Immutable audit trail for all critical data changes.

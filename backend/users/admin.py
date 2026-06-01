@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     User, TechnicianProfile, ClientProfile, ManagementProfile,
-    UserCapabilityGrant, AdminSettings, ChangeLog
+    UserCapabilityGrant, AdminSettings, ActivityLog, ChangeLog
 )
 
 
@@ -180,6 +180,36 @@ class ChangeLogAdmin(admin.ModelAdmin):
     readonly_fields = ['changed_at', 'summary', 'content_type', 'object_id', 'action', 'field_name', 'old_value', 'new_value', 'changed_by']
     raw_id_fields = ['changed_by']
     date_hierarchy = 'changed_at'
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ActivityLog)
+class ActivityLogAdmin(admin.ModelAdmin):
+    list_display = ['id', 'category', 'action', 'actor', 'target_model', 'target_id', 'created_at']
+    list_filter = ['category', 'action', 'target_model']
+    search_fields = ['message', 'target_label', 'actor__username', 'actor__first_name', 'actor__last_name']
+    readonly_fields = [
+        'actor',
+        'actor_role',
+        'category',
+        'action',
+        'target_app_label',
+        'target_model',
+        'target_id',
+        'target_label',
+        'message',
+        'metadata',
+        'ip_address',
+        'user_agent',
+        'created_at',
+    ]
+    raw_id_fields = ['actor']
+    date_hierarchy = 'created_at'
 
     def has_add_permission(self, request):
         return False

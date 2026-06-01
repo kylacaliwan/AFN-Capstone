@@ -69,44 +69,46 @@ const getAfterSalesItems = (stats, user) => {
 
 const getAdminMenu = (user, afterSalesItems) => {
   const canViewJobHistory = user?.role === 'superadmin' || hasAnyCapability(user, ADMIN_JOB_HISTORY_CAPABILITIES);
-  const homeItems = [
+  const overviewItems = [
     { label: 'Dashboard', path: '/admin/dashboard', icon: FiHome },
     { label: 'Analytics', path: '/admin/analytics', icon: FiTrendingUp },
     { label: 'Reports', path: '/admin/reports', icon: FiFileText }
   ];
-  const operationsItems = [
+  const serviceOperationsItems = [
     { label: 'Calendar', path: '/admin/calendar', icon: FiCalendar },
-    { label: 'Tickets', path: '/admin/service-tickets', icon: FiClipboard },
+    { label: 'Service Tickets', path: '/admin/service-tickets', icon: FiClipboard },
     { label: 'Dispatch Board', path: '/admin/dispatch-board', icon: FiLayers },
-    { label: 'Live Map', path: '/admin/technician-tracking', icon: FiMap },
+    { label: 'Technician Tracking', path: '/admin/technician-tracking', icon: FiMap },
     { label: 'Coverage Heatmap', path: '/admin/coverage-heatmap', icon: FiTrendingUp },
-    { label: 'Services', path: '/admin/services', icon: FiTool },
-    { label: 'Inventory', path: '/admin/inventory', icon: FiPackage },
     canViewJobHistory ? { label: 'Job History', path: '/admin/job-history', icon: FiFileText } : null
   ].filter(Boolean);
+  const serviceSetupItems = [
+    { label: 'Services', path: '/admin/services', icon: FiTool },
+    { label: 'Inventory', path: '/admin/inventory', icon: FiPackage }
+  ];
   const communicationItems = [];
   communicationItems.push({ label: 'Messages', path: '/admin/messages', icon: FiMessageSquare });
-  const accessItems = [];
+  const adminControlItems = [];
   const canManageAccess = canManageStaffAccess(user);
-  accessItems.push({
+  adminControlItems.push({
     label: 'User Management',
     path: '/admin/user-management',
     icon: FiUsers,
     disabled: !canManageAccess,
     title: canManageAccess ? 'Manage users and staff capabilities' : 'Superadmin must grant you access'
   });
-  const setupItems = [
+  adminControlItems.push(
     { label: 'Activity Logs', path: '/admin/activity-logs', icon: FiActivity },
     { label: 'Settings', path: '/admin/settings', icon: FiSettings }
-  ];
+  );
 
   const sections = [
-      { title: 'Home', items: homeItems },
-      { title: 'Operations', items: operationsItems },
+      { title: 'Overview', items: overviewItems },
+      { title: 'Service Operations', items: serviceOperationsItems },
+      { title: 'Service Setup', items: serviceSetupItems },
       ...(afterSalesItems.length > 0 ? [{ title: 'After-Sales', items: afterSalesItems }] : []),
       ...(communicationItems.length > 0 ? [{ title: 'Communication', items: communicationItems }] : []),
-      { title: 'Access', items: accessItems },
-      { title: 'Setup', items: setupItems }
+      { title: 'Admin Controls', items: adminControlItems }
     ].filter((section) => section.items.length > 0);
 
   return {
@@ -243,10 +245,10 @@ export default function Sidebar({ user, isOpen, onClose }) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex w-[min(17rem,calc(100vw-2rem))] flex-col overflow-y-auto border-r border-brand-800/40 bg-brand-900 transition-transform duration-300 ease-in-out lg:static lg:min-h-[calc(100vh-1rem)] lg:w-64 lg:translate-x-0 ${
-          isOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
-      >
+  className={`fixed top-0 left-0 z-40 flex h-screen w-[min(17rem,calc(100vw-2rem))] flex-col border-r border-brand-800/40 bg-brand-900 transition-transform duration-300 ease-in-out lg:w-64 ${
+    isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+  }`}
+>
         {/* Logo area */}
         <div className="px-4 pb-7 pt-8">
           <div className="flex items-start justify-center">

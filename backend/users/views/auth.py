@@ -1,5 +1,6 @@
 # Auto-split from users/views.py
 from users.views.helpers import *  # noqa: F401,F403
+from users.signals import log_activity
 
 class IsAdminOrReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -100,10 +101,23 @@ class UserViewSet(viewsets.ModelViewSet):
             )
             if user:
                 token, created = Token.objects.get_or_create(user=user)
+                log_activity(
+                    actor=user,
+                    category='security',
+                    action='login',
+                    target=user,
+                    message=f'{user.get_full_name().strip() or user.username} logged in',
+                )
                 return Response({
                     'user': UserSerializer(user).data,
                     'token': token.key
                 })
+            log_activity(
+                category='security',
+                action='error',
+                message='Failed login attempt',
+                metadata={'identifier': serializer.validated_data['username']},
+            )
             return Response(
                 {'error': 'Invalid credentials'},
                 status=status.HTTP_401_UNAUTHORIZED
@@ -114,6 +128,13 @@ class UserViewSet(viewsets.ModelViewSet):
     def logout(self, request):
         """User logout"""
         try:
+            log_activity(
+                actor=request.user,
+                category='security',
+                action='logout',
+                target=request.user,
+                message=f'{request.user.get_full_name().strip() or request.user.username} logged out',
+            )
             request.user.auth_token.delete()
             return Response({'message': 'Logged out successfully'})
         except Token.DoesNotExist:
@@ -284,10 +305,23 @@ class AuthViewSet(viewsets.ViewSet):
             )
             if user:
                 token, created = Token.objects.get_or_create(user=user)
+                log_activity(
+                    actor=user,
+                    category='security',
+                    action='login',
+                    target=user,
+                    message=f'{user.get_full_name().strip() or user.username} logged in',
+                )
                 return Response({
                     'user': UserSerializer(user).data,
                     'token': token.key
                 })
+            log_activity(
+                category='security',
+                action='error',
+                message='Failed login attempt',
+                metadata={'identifier': serializer.validated_data['username']},
+            )
             return Response(
                 {'error': 'Invalid credentials'},
                 status=status.HTTP_401_UNAUTHORIZED

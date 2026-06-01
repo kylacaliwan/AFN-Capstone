@@ -70,7 +70,7 @@ class AdminAnalyticsViewSet(viewsets.ViewSet):
         days = int(request.query_params.get('days', 30))
         days = max(7, min(365, days))  # Clamp between 7 and 365 days
 
-        overview = self._build_overview()
+        overview = self._build_overview(today, days)
         service_breakdown = self._build_service_breakdown(today, days)
         top_technician = self._build_top_technician(today, days)
         completion_trend = self._build_completion_trend(today, days)
@@ -111,11 +111,23 @@ class AdminAnalyticsViewSet(viewsets.ViewSet):
             'seasonalInventoryDemand': seasonal_inventory_demand,
         })
 
-    def _build_overview(self):
-        completed_requests = ServiceRequest.objects.filter(status='Completed')
-        completed_tickets = ServiceTicket.objects.filter(status='Completed')
+    def _build_overview(self, today, days=30):
+        period_start = today - timezone.timedelta(days=days - 1)
+        period_requests = ServiceRequest.objects.filter(
+            request_date__date__gte=period_start,
+            request_date__date__lte=today,
+        )
+        completed_tickets = ServiceTicket.objects.filter(
+            status='Completed',
+            completed_date__date__gte=period_start,
+            completed_date__date__lte=today,
+        )
         active_tickets = ServiceTicket.objects.filter(status__in=['Not Started', 'In Progress', 'On Hold'])
-        assigned_tickets = ServiceTicket.objects.filter(assigned_at__isnull=False).select_related('request')
+        assigned_tickets = ServiceTicket.objects.filter(
+            assigned_at__isnull=False,
+            assigned_at__date__gte=period_start,
+            assigned_at__date__lte=today,
+        ).select_related('request')
         available_technicians = User.objects.filter(
             role='technician',
             status='active',
@@ -129,9 +141,9 @@ class AdminAnalyticsViewSet(viewsets.ViewSet):
         ).count()
 
         return {
-            'totalRequests': ServiceRequest.objects.count(),
-            'completedRequests': completed_requests.count(),
-            'pendingRequests': ServiceRequest.objects.filter(status='Pending').count(),
+            'totalRequests': period_requests.count(),
+            'completedRequests': completed_tickets.values('request_id').distinct().count(),
+            'pendingRequests': period_requests.filter(status='Pending').count(),
             'activeTickets': active_tickets.count(),
             'activeUsers': User.objects.filter(status='active', is_active=True).count(),
             'activeTechnicians': available_technicians,
@@ -171,10 +183,13 @@ class AdminAnalyticsViewSet(viewsets.ViewSet):
     def _build_service_breakdown(self, today, days=30):
         recent_start = today - timezone.timedelta(days=days - 1)
         breakdown = (
-            ServiceRequest.objects.values('service_type_id', 'service_type__name')
+            ServiceRequest.objects.filter(
+                request_date__date__gte=recent_start,
+                request_date__date__lte=today,
+            )
+            .values('service_type_id', 'service_type__name')
             .annotate(
                 count=Count('id'),
-                recent_requests=Count('id', filter=Q(request_date__date__gte=recent_start)),
                 completed_requests=Count('id', filter=Q(status='Completed'))
             )
             .order_by('-count', 'service_type__name')
@@ -185,7 +200,7 @@ class AdminAnalyticsViewSet(viewsets.ViewSet):
                 'id': row['service_type_id'],
                 'name': row['service_type__name'] or 'Unknown Service',
                 'count': row['count'],
-                'recentRequests': row['recent_requests'],
+                'recentRequests': row['count'],
                 'completedRequests': row['completed_requests'],
             }
             for row in breakdown

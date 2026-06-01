@@ -13,8 +13,10 @@ export default function TechnicianProfile() {
     email: '',
     skills: [],
     totalCompleted: 0,
+    completedLast30Days: 0,
     avgCompletionTime: '',
-    rating: 0
+    rating: 0,
+    ratingLast30Days: 0
   });
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -44,6 +46,8 @@ export default function TechnicianProfile() {
   };
 
   const skills = Array.isArray(profile.skills) ? profile.skills : [];
+  const completedLast30Days = profile.completedLast30Days ?? profile.totalCompleted ?? 0;
+  const ratingLast30Days = profile.ratingLast30Days ?? profile.rating ?? 0;
 
   return (
     <Layout>
@@ -165,11 +169,11 @@ export default function TechnicianProfile() {
             <div className="space-y-3">
               <div className="flex justify-between text-sm text-slate-600">
                 <span>Jobs Completed</span>
-                <span className="text-xl font-bold text-slate-900">{profile.totalCompleted || 0}</span>
+                <span className="text-xl font-bold text-slate-900">{completedLast30Days || 0}</span>
               </div>
               <div className="flex justify-between text-sm text-slate-600">
                 <span>Avg Rating</span>
-                <span className="font-semibold text-slate-900">{profile.rating ? `${profile.rating.toFixed(1)}/5` : 'N/A'}</span>
+                <span className="font-semibold text-slate-900">{ratingLast30Days ? `${ratingLast30Days.toFixed(1)}/5` : 'N/A'}</span>
               </div>
             </div>
           </div>

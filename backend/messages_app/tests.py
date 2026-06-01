@@ -1,8 +1,11 @@
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
+from django.utils import timezone
 
 from messages_app.models import Message
+from notifications.models import Notification
+from services.models import ServiceRequest, ServiceTicket, ServiceType
 from users.models import User
 
 
@@ -33,6 +36,25 @@ class MessageApiTests(APITestCase):
             username='message-client',
             password='Password123!',
             role='client',
+        )
+        self.other_client_user = User.objects.create_user(
+            username='message-other-client',
+            password='Password123!',
+            role='client',
+        )
+        self.service_type = ServiceType.objects.create(name='After-sales test')
+        self.service_request = ServiceRequest.objects.create(
+            client=self.client_user,
+            service_type=self.service_type,
+            description='Needs after-sales support.',
+            status='Approved',
+        )
+        self.ticket = ServiceTicket.objects.create(
+            request=self.service_request,
+            technician=self.technician_user,
+            supervisor=self.admin_user,
+            scheduled_date=timezone.now().date(),
+            status='Completed',
         )
         self.token = Token.objects.create(user=self.admin_user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
@@ -98,6 +120,90 @@ class MessageApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_client_can_create_ticket_after_sales_message(self):
+        client_token = Token.objects.create(user=self.client_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {client_token.key}')
+
+        response = self.client.post(
+            '/api/messages/',
+            {
+                'room_type': 'group',
+                'group_key': f'after_sales_ticket_{self.ticket.id}',
+                'ticket': self.ticket.id,
+                'text': 'I need after-sales help for this ticket.',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        message = Message.objects.get(id=response.data['id'])
+        self.assertEqual(message.sender, self.client_user)
+        self.assertEqual(message.ticket, self.ticket)
+        self.assertEqual(message.group_key, f'after_sales_ticket_{self.ticket.id}')
+        self.assertIsNone(message.receiver)
+
+    def test_client_ticket_message_notifies_admin_workspace(self):
+        client_token = Token.objects.create(user=self.client_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {client_token.key}')
+
+        response = self.client.post(
+            '/api/messages/',
+            {
+                'room_type': 'group',
+                'group_key': f'after_sales_ticket_{self.ticket.id}',
+                'ticket': self.ticket.id,
+                'text': 'Please help with a warranty issue.',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        notifications = Notification.objects.filter(
+            ticket=self.ticket,
+            type='customer_inquiry',
+        )
+        self.assertEqual(notifications.count(), 2)
+        notified_users = {notification.user_id for notification in notifications}
+        self.assertEqual(notified_users, {self.admin_user.id, self.superadmin_user.id})
+
+    def test_client_only_sees_own_ticket_messages(self):
+        Message.objects.create(
+            sender=self.client_user,
+            ticket=self.ticket,
+            room_type='group',
+            group_key=f'after_sales_ticket_{self.ticket.id}',
+            message_text='Visible message.',
+        )
+        other_request = ServiceRequest.objects.create(
+            client=self.other_client_user,
+            service_type=self.service_type,
+            description='Other client support.',
+            status='Approved',
+        )
+        other_ticket = ServiceTicket.objects.create(
+            request=other_request,
+            technician=self.technician_user,
+            supervisor=self.admin_user,
+            scheduled_date=timezone.now().date(),
+        )
+        Message.objects.create(
+            sender=self.other_client_user,
+            ticket=other_ticket,
+            room_type='group',
+            group_key=f'after_sales_ticket_{other_ticket.id}',
+            message_text='Hidden message.',
+        )
+        client_token = Token.objects.create(user=self.client_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {client_token.key}')
+
+        response = self.client.get('/api/messages/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response_items = response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
+        message_ids = {item['id'] for item in response_items}
+        self.assertEqual(len(message_ids), 1)
+        self.assertTrue(Message.objects.filter(id__in=message_ids, ticket=self.ticket).exists())
 
     def test_direct_message_rejects_client_receiver(self):
         response = self.client.post(

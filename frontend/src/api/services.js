@@ -116,6 +116,32 @@ export const fetchServiceTickets = async (filters = {}) => {
   }
 };
 
+export const fetchServiceTicketSummary = async (filters = {}) => {
+  try {
+    const params = {};
+    if (filters.workspace) {
+      params.workspace = filters.workspace;
+    }
+
+    const { data } = await api.get('/services/service-tickets/summary/', { params });
+    return {
+      totalTickets: Number(data?.total_tickets || 0),
+      activeQueue: Number(data?.active_queue || 0),
+      completed: Number(data?.completed || 0),
+      cancelled: Number(data?.cancelled || 0),
+      unassignedActive: Number(data?.unassigned_active || 0),
+      dispatchable: Number(data?.dispatchable || 0),
+      assignedActive: Number(data?.assigned_active || 0),
+      missedDispatch: Number(data?.missed_dispatch || 0),
+      slaWarning: Number(data?.sla_warning || 0),
+      slaOverdue: Number(data?.sla_overdue || 0),
+      slaRisk: Number(data?.sla_risk || 0)
+    };
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load service ticket summary.'));
+  }
+};
+
 export const fetchTicketTimeline = async (ticketId) => {
   try {
     const { data } = await api.get('/services/status-history/', { params: { ticket: ticketId } });

@@ -3,8 +3,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import Layout from '../../components/layout/Layout';
 import StatusBadge from '../../components/ui/StatusBadge';
 import TicketTimelineModal from '../../components/shared/TicketTimelineModal';
-import { FiMapPin, FiCalendar, FiUser, FiArrowLeft, FiStar, FiImage, FiX, FiClock } from 'react-icons/fi';
-import { api, fetchRequestDetail, fetchTicketTimeline, requestTicketReschedule, submitRequestRating } from '../../api/api';
+import { FiMapPin, FiCalendar, FiUser, FiArrowLeft, FiStar, FiImage, FiX, FiClock, FiMessageCircle, FiSend } from 'react-icons/fi';
+import { api, fetchMessages, fetchRequestDetail, fetchTicketTimeline, requestTicketReschedule, sendMessage, submitRequestRating } from '../../api/api';
 import { getLocalDateInputValue } from '../../utils/date';
 import { clientTechnicianDisplayString } from '../../utils/clientTechnicianDisplay';
 import { formatTicketId } from '../../utils/roleIds';
@@ -41,6 +41,10 @@ export default function ClientRequestDetail() {
   const [timelineEvents, setTimelineEvents] = useState([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState('');
+  const [afterSalesMessages, setAfterSalesMessages] = useState([]);
+  const [afterSalesMessage, setAfterSalesMessage] = useState('');
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageSending, setMessageSending] = useState(false);
   const entityType = searchParams.get('entity') || 'request';
 
   useEffect(() => {
@@ -78,10 +82,56 @@ export default function ClientRequestDetail() {
       if (data.status === 'completed' && data.ticket_id) {
         loadProofImages(data.ticket_id);
       }
+      if (data.ticket_id) {
+        loadAfterSalesMessages(data.ticket_id);
+      } else {
+        setAfterSalesMessages([]);
+      }
     } catch (err) {
       setError(err.message || 'Failed to load request details');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAfterSalesMessages = async (ticketId) => {
+    setMessagesLoading(true);
+    try {
+      const allMessages = await fetchMessages('client');
+      const roomKey = `after_sales_ticket_${ticketId}`;
+      setAfterSalesMessages(
+        allMessages
+          .filter((message) => Number(message.ticketId) === Number(ticketId) && message.groupKey === roomKey)
+          .sort((first, second) => new Date(first.timestamp) - new Date(second.timestamp))
+      );
+    } catch {
+      setAfterSalesMessages([]);
+    } finally {
+      setMessagesLoading(false);
+    }
+  };
+
+  const handleSendAfterSalesMessage = async () => {
+    if (!request?.ticket_id || !afterSalesMessage.trim()) return;
+
+    setMessageSending(true);
+    try {
+      const sentMessage = await sendMessage({
+        roomType: 'group',
+        groupKey: `after_sales_ticket_${request.ticket_id}`,
+        ticketId: request.ticket_id,
+        text: afterSalesMessage.trim(),
+      });
+      setAfterSalesMessages((previousMessages) => [...previousMessages, sentMessage]);
+      setAfterSalesMessage('');
+      setNotice({ tone: 'success', message: 'After-sales message sent.' });
+    } catch (err) {
+      setNotice({
+        tone: 'error',
+        message: `Failed to send after-sales message: ${err.message}`
+      });
+    } finally {
+      setMessageSending(false);
     }
   };
 
@@ -556,6 +606,54 @@ export default function ClientRequestDetail() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {request.ticket_id && (
+              <div className="rounded-lg bg-white p-6 shadow-sm border border-slate-200">
+                <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-800">
+                  <FiMessageCircle className="text-slate-600" />
+                  After-Sales Messages
+                </h3>
+
+                <div className="mb-4 max-h-64 space-y-3 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  {messagesLoading ? (
+                    <p className="py-4 text-center text-sm text-slate-500">Loading messages...</p>
+                  ) : afterSalesMessages.length > 0 ? (
+                    afterSalesMessages.map((message) => (
+                      <div key={message.id} className="rounded-lg bg-white px-3 py-2 shadow-sm">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-slate-600">{message.senderName || 'Service team'}</span>
+                          <span className="text-xs text-slate-400">
+                            {message.timestamp ? new Date(message.timestamp).toLocaleString() : ''}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-800">{message.text}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="py-4 text-center text-sm text-slate-500">No after-sales messages yet.</p>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <textarea
+                    value={afterSalesMessage}
+                    onChange={(event) => setAfterSalesMessage(event.target.value)}
+                    rows="2"
+                    className="min-h-12 flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                    placeholder="Write an after-sales message for this ticket..."
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSendAfterSalesMessage}
+                    disabled={messageSending || !afterSalesMessage.trim()}
+                    className="grid h-12 w-12 place-items-center rounded-xl bg-brand-500 text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Send after-sales message"
+                  >
+                    <FiSend size={18} />
+                  </button>
+                </div>
               </div>
             )}
 

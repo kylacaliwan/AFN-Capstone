@@ -295,6 +295,7 @@ export const fetchActivityLogs = async (filters = {}) => {
   try {
     const params = {};
     if (filters.search) params.search = filters.search;
+    if (filters.category) params.category = filters.category;
     if (filters.action) params.action = filters.action;
     if (filters.model) params.model = filters.model;
     if (filters.changedBy) params.changed_by = filters.changedBy;
@@ -305,6 +306,10 @@ export const fetchActivityLogs = async (filters = {}) => {
     const rows = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
     return rows.map((log) => ({
       id: log.id,
+      category: log.category || 'system',
+      message: log.message || log.summary || '',
+      metadata: log.metadata || {},
+      ipAddress: log.ip_address || '',
       appLabel: log.app_label,
       model: log.model,
       objectId: log.object_id,
@@ -438,6 +443,22 @@ export const fetchInventory = async () => {
     return Array.isArray(inventoryArray) ? inventoryArray : [];
   } catch (error) {
     throw new Error(getApiErrorMessage(error, 'Unable to load inventory.'));
+  }
+};
+
+export const fetchInventorySummary = async () => {
+  try {
+    const { data } = await api.get('/inventory/items/statistics/');
+    return {
+      totalItems: Number(data?.total_items || 0),
+      totalValue: Number(data?.total_value || 0),
+      lowStockCount: Number(data?.low_stock_count || 0),
+      outOfStock: Number(data?.out_of_stock || 0),
+      statusCounts: data?.status_counts || {},
+      categoryCounts: Array.isArray(data?.category_counts) ? data.category_counts : []
+    };
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to load inventory summary.'));
   }
 };
 

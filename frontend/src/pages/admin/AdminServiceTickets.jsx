@@ -11,6 +11,7 @@ import {
   approveServiceRequest,
   createServiceRequest,
   fetchAdminClients,
+  fetchServiceTicketSummary,
   fetchServiceTickets,
   fetchServiceTypes,
   fetchTicketTimeline,
@@ -89,21 +90,25 @@ export default function AdminServiceTickets() {
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState('');
   const [rescheduleMessage, setRescheduleMessage] = useState('');
+  const [ticketSummary, setTicketSummary] = useState(null);
   const [error, setError] = useState('');
 
   const loadData = async () => {
     try {
-      const [ticketData, serviceTypeData, clientData] = await Promise.all([
+      const [ticketData, serviceTypeData, clientData, summaryData] = await Promise.all([
         fetchServiceTickets(),
         fetchServiceTypes(),
-        fetchAdminClients()
+        fetchAdminClients(),
+        fetchServiceTicketSummary()
       ]);
       setTickets(ticketData);
       setServiceTypes(serviceTypeData);
       setClients(clientData);
+      setTicketSummary(summaryData);
       setError('');
     } catch (loadError) {
       setTickets([]);
+      setTicketSummary(null);
       setError(loadError.message || 'Unable to load service tickets.');
     }
   };
@@ -241,6 +246,10 @@ export default function AdminServiceTickets() {
   const missedDispatchTickets = activeQueueTickets.filter((t) => t.isMissedDispatch);
   const warningTickets = activeQueueTickets.filter((t) => t?.sla?.state === 'warning');
   const overdueTickets = activeQueueTickets.filter((t) => t?.sla?.state === 'overdue');
+  const activeQueueCount = ticketSummary?.activeQueue ?? activeQueueTickets.length;
+  const missedDispatchCount = ticketSummary?.missedDispatch ?? missedDispatchTickets.length;
+  const slaRiskCount = ticketSummary?.slaRisk ?? (overdueTickets.length + warningTickets.length);
+  const completedCount = ticketSummary?.completed ?? completedTickets.length;
   const sortedTickets = [...activeQueueTickets].sort((firstTicket, secondTicket) => {
     if (firstTicket.isMissedDispatch !== secondTicket.isMissedDispatch) {
       return firstTicket.isMissedDispatch ? -1 : 1;
@@ -498,19 +507,19 @@ export default function AdminServiceTickets() {
       <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="stat-card p-4">
           <p className="text-[13px] font-medium text-slate-500">Active Queue</p>
-          <p className="mt-1 text-3xl font-bold text-slate-800">{activeQueueTickets.length}</p>
+          <p className="mt-1 text-3xl font-bold text-slate-800">{activeQueueCount}</p>
         </div>
         <div className="stat-card p-4">
           <p className="text-[13px] font-medium text-slate-500">Missed Dispatch</p>
-          <p className="mt-1 text-3xl font-bold text-rose-600">{missedDispatchTickets.length}</p>
+          <p className="mt-1 text-3xl font-bold text-rose-600">{missedDispatchCount}</p>
         </div>
         <div className="stat-card p-4">
           <p className="text-[13px] font-medium text-slate-500">SLA Risk</p>
-          <p className="mt-1 text-3xl font-bold text-amber-600">{overdueTickets.length + warningTickets.length}</p>
+          <p className="mt-1 text-3xl font-bold text-amber-600">{slaRiskCount}</p>
         </div>
         <div className="stat-card p-4">
           <p className="text-[13px] font-medium text-slate-500">Completed</p>
-          <p className="mt-1 text-3xl font-bold text-emerald-600">{completedTickets.length}</p>
+          <p className="mt-1 text-3xl font-bold text-emerald-600">{completedCount}</p>
           <button
             type="button"
             onClick={() => navigate('/admin/job-history')}

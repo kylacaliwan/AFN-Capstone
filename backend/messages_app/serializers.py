@@ -3,6 +3,23 @@ from .models import Message
 
 
 STAFF_MESSAGE_ROLES = {'superadmin', 'admin', 'technician'}
+ADMIN_MESSAGE_ROLES = {'superadmin', 'admin'}
+
+
+def user_can_access_ticket(user, ticket):
+    if not user or not ticket:
+        return False
+    if user.role in ADMIN_MESSAGE_ROLES:
+        return True
+    if user.role == 'client':
+        return ticket.request.client_id == user.id
+    if user.role == 'technician':
+        return (
+            ticket.technician_id == user.id or
+            ticket.supervisor_id == user.id or
+            ticket.crew_assignments.filter(technician_id=user.id).exists()
+        )
+    return False
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -66,11 +83,30 @@ class MessageSerializer(serializers.ModelSerializer):
         sender = getattr(request, 'user', None)
         room_type = attrs.get('room_type') or getattr(self.instance, 'room_type', 'direct') or 'direct'
         receiver = attrs.get('receiver') or getattr(self.instance, 'receiver', None)
+        ticket = attrs.get('ticket') or getattr(self.instance, 'ticket', None)
 
         if room_type not in {'direct', 'group'}:
             raise serializers.ValidationError({'room_type': 'Unsupported message room type.'})
         if not sender or not sender.is_authenticated:
             raise serializers.ValidationError('Authentication is required to send a message.')
+
+        if ticket:
+            if not user_can_access_ticket(sender, ticket):
+                raise serializers.ValidationError({'ticket': 'You do not have access to this ticket.'})
+
+            if room_type == 'direct':
+                if receiver is None:
+                    raise serializers.ValidationError({'receiver': 'A message receiver is required.'})
+                if receiver.id == sender.id:
+                    raise serializers.ValidationError({'receiver': 'Choose another participant for this message.'})
+                if not user_can_access_ticket(receiver, ticket):
+                    raise serializers.ValidationError({'receiver': 'Choose a participant assigned to this ticket.'})
+                attrs['group_key'] = None
+            else:
+                attrs['receiver'] = None
+                attrs['group_key'] = attrs.get('group_key') or f'after_sales_ticket_{ticket.id}'
+            return attrs
+
         if sender.role not in STAFF_MESSAGE_ROLES:
             raise serializers.ValidationError('Only admins, superadmins, and technicians can use staff messages.')
 

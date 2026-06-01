@@ -390,6 +390,14 @@ class TechnicianProfileView(viewsets.ViewSet):
         technician = request.user
         completed_tickets = get_technician_ticket_queryset(technician).filter(status='Completed')
         avg_rating = completed_tickets.exclude(client_rating__isnull=True).aggregate(avg=Avg('client_rating')).get('avg')
+        thirty_days_ago = timezone.now() - timezone.timedelta(days=29)
+        completed_last_30_days = completed_tickets.filter(completed_date__gte=thirty_days_ago)
+        avg_rating_last_30_days = (
+            completed_last_30_days
+            .exclude(client_rating__isnull=True)
+            .aggregate(avg=Avg('client_rating'))
+            .get('avg')
+        )
         skills = TechnicianSkill.objects.filter(technician=technician).select_related('service_type')
 
         # Serialize skills with all details
@@ -409,8 +417,10 @@ class TechnicianProfileView(viewsets.ViewSet):
             'email': technician.email or '',
             'skills': skills_data,
             'totalCompleted': completed_tickets.count(),
+            'completedLast30Days': completed_last_30_days.count(),
             'avgCompletionTime': '',
             'rating': float(avg_rating) if avg_rating is not None else 0,
+            'ratingLast30Days': float(avg_rating_last_30_days) if avg_rating_last_30_days is not None else 0,
             'status': 'Available' if technician.is_available and technician.status == 'active' else technician.status.title()
         })
 

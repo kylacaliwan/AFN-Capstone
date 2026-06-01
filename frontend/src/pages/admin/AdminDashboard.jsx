@@ -78,12 +78,18 @@ export default function AdminDashboard() {
   const pendingRequests = Array.isArray(stats?.pending_requests) ? stats.pending_requests : [];
   const slaQueue = Array.isArray(stats?.sla_queue) ? stats.sla_queue : [];
   const clientSchedule = Array.isArray(stats?.client_schedule) ? stats.client_schedule : [];
-  const activeTechnicianJobs = Array.isArray(stats?.active_technician_jobs) ? stats.active_technician_jobs : [];
+  const activeTechnicianJobs = Array.isArray(stats?.operations?.active_technician_jobs)
+    ? stats.operations.active_technician_jobs
+    : (Array.isArray(stats?.active_technician_jobs) ? stats.active_technician_jobs : []);
   const slaOverview = stats?.sla_overview || {};
   const overdueCount = Number(slaOverview.overdue_count || 0);
   const warningCount = Number(slaOverview.warning_count || 0);
-  const lowStock = Number(overview.low_stock_items || 0);
-  const dueMaintenance = Number(overview.due_maintenance || 0);
+  const pendingApprovalsCount = Number(overview.pending_approvals ?? pendingRequests.length ?? 0);
+  const activeTicketsCount = Number(overview.active_tickets ?? 0);
+  const completedTodayCount = Number(overview.completed_today ?? 0);
+  const activeTechniciansCount = Number(overview.active_technicians ?? 0);
+  const lowStock = Number(overview.low_stock_items ?? 0);
+  const dueMaintenance = Number(overview.due_maintenance ?? 0);
   const canOpenUsers = canViewAdminUserDirectory(user);
 
   const attentionItems = [
@@ -164,7 +170,7 @@ export default function AdminDashboard() {
         <div className="grid gap-4 sm:grid-cols-3">
           <StatsCard
             title="Pending Approvals"
-            value={pendingRequests.length}
+            value={pendingApprovalsCount}
             icon={FiClipboard}
             accent="amber"
             color="text-amber-600"
@@ -172,7 +178,7 @@ export default function AdminDashboard() {
           />
           <StatsCard
             title="Active Tickets"
-            value={Number(overview.active_tickets || overview.total_tickets || 0)}
+            value={activeTicketsCount}
             icon={FiTrendingUp}
             accent="blue"
             color="text-brand-600"
@@ -180,7 +186,7 @@ export default function AdminDashboard() {
           />
           <StatsCard
             title="Completed Today"
-            value={Number(overview.completed_today || 0)}
+            value={completedTodayCount}
             icon={FiCheckCircle}
             accent="emerald"
             color="text-emerald-600"
@@ -225,7 +231,7 @@ export default function AdminDashboard() {
             <FiUsers className="h-4 w-4" />
           </div>
           <span>
-            <span className="font-semibold text-slate-800">{Number(overview.active_technicians || 0)}</span> technicians currently active or available for field work
+            <span className="font-semibold text-slate-800">{activeTechniciansCount}</span> technicians currently active or available for field work
           </span>
         </div>
 

@@ -1,6 +1,18 @@
 # Auto-split from services/views.py
 from services.views.helpers import *  # noqa: F401,F403
 
+
+def _bounded_days(request, default=30, minimum=1, maximum=365):
+    try:
+        days = int(request.query_params.get('days', default))
+    except (TypeError, ValueError):
+        days = default
+    return max(minimum, min(maximum, days))
+
+
+def _period_start(today, days):
+    return today - timezone.timedelta(days=days - 1)
+
 class GISDashboardView(viewsets.ViewSet):
     """Geographic Information System (GIS) Dashboard - Mapping component for visualizing geographic service data."""
     permission_classes = [IsAdminOrSupervisor]
@@ -128,7 +140,7 @@ class ServiceAnalyticsViewSet(viewsets.ModelViewSet):
         end_date_param = request.query_params.get('end_date')
         period = request.query_params.get('period', 'monthly')  # weekly, monthly, yearly
         service_type_id = request.query_params.get('service_type')
-        days = int(request.query_params.get('days', 30))
+        days = _bounded_days(request)
 
         today = timezone.now().date()
 
@@ -136,9 +148,9 @@ class ServiceAnalyticsViewSet(viewsets.ModelViewSet):
             try:
                 start_date = timezone.datetime.strptime(start_date_param, '%Y-%m-%d').date()
             except ValueError:
-                start_date = today - timezone.timedelta(days=days)
+                start_date = _period_start(today, days)
         else:
-            start_date = today - timezone.timedelta(days=days)
+            start_date = _period_start(today, days)
 
         if end_date_param:
             try:
@@ -167,8 +179,8 @@ class ServiceAnalyticsViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def service_type_summary(self, request):
         """Get analytics breakdown by service type for charts."""
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now().date() - timezone.timedelta(days=days)
+        days = _bounded_days(request)
+        start_date = _period_start(timezone.now().date(), days)
 
         summary = (
             ServiceTicket.objects
@@ -396,8 +408,8 @@ class TechnicianPerformanceViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def leaderboard(self, request):
         """Get technician performance leaderboard"""
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now().date() - timezone.timedelta(days=days)
+        days = _bounded_days(request)
+        start_date = _period_start(timezone.now().date(), days)
 
         # Aggregate performance over the period
         performances = TechnicianPerformance.objects.filter(
@@ -413,8 +425,8 @@ class TechnicianPerformanceViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def performance_breakdown(self, request):
         """Detailed per-technician performance breakdown for admin monitoring."""
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now().date() - timezone.timedelta(days=days)
+        days = _bounded_days(request)
+        start_date = _period_start(timezone.now().date(), days)
 
         technicians = User.objects.filter(role='technician', status='active')
         results = []
@@ -546,8 +558,8 @@ class DemandForecastViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def accuracy_report(self, request):
         """Get forecast accuracy report"""
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now().date() - timezone.timedelta(days=days)
+        days = _bounded_days(request)
+        start_date = _period_start(timezone.now().date(), days)
 
         forecasts = DemandForecast.objects.filter(
             forecast_date__lt=timezone.now().date(),

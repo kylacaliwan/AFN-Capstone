@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiAlertCircle, FiArrowRight, FiBell, FiLogOut, FiMenu } from 'react-icons/fi';
+import {
+  FiAlertCircle,
+  FiArrowRight,
+  FiBell,
+  FiLogOut,
+  FiMenu,
+  FiRefreshCw
+} from 'react-icons/fi';
 import { useAuth } from '../../context/AuthContext';
+
 import {
   fetchNotifications,
   getUnreadNotificationCount,
@@ -94,6 +102,7 @@ const getRoleMeta = (user, workspaceRole) => {
   }
 };
 
+
 const getWorkspaceRole = (pathname, fallbackRole) => {
   if (pathname.startsWith('/technician/')) return 'technician';
   return fallbackRole;
@@ -106,7 +115,10 @@ const formatNotificationTime = (value) => {
   return parsed.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
-export default function Topbar({ toggleSidebar }) {
+export default function Topbar({
+  toggleSidebar,
+  onRefresh,
+}) {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -114,6 +126,25 @@ export default function Topbar({ toggleSidebar }) {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+const handleRefresh = async () => {
+  setRefreshing(true);
+
+  try {
+    if (onRefresh) {
+      await onRefresh();
+    } else {
+      window.location.reload();
+    }
+  } finally {
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 500);
+  }
+};
+
 
   const activeRoute = useMemo(
     () => routeMeta.find((item) => location.pathname.startsWith(item.prefix)),
@@ -297,32 +328,23 @@ export default function Topbar({ toggleSidebar }) {
               </div>
             )}
           </div>
-
-          {/* Primary action */}
-          {primaryAction && (
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             <button
-              onClick={() => navigate(primaryAction.path)}
-              className="hidden items-center gap-2 rounded-[12px] border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-brand-50 hover:text-brand-700 sm:inline-flex"
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-60"
             >
-              {primaryAction.label}
-              <FiArrowRight size={14} />
-            </button>
-          )}
+              <FiRefreshCw
+                className={`h-3.5 w-3.5 ${
+                  refreshing ? 'animate-spin' : ''
+                }`}
+              />
 
-          {/* User avatar + logout */}
-          <div className="flex items-center gap-2">
-            <div className="hidden h-10 w-10 items-center justify-center rounded-[12px] bg-brand-50 text-[12px] font-bold text-brand-700 ring-1 ring-brand-100 sm:flex">
-              {initials}
-            </div>
-            <button
-              onClick={logout}
-              className="inline-flex items-center gap-1.5 rounded-[12px] bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-700"
-              title="Sign out"
-            >
-              <FiLogOut size={15} />
-              <span className="hidden sm:inline">Logout</span>
+              {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
           </div>
+          
         </div>
         </div>
       </div>
