@@ -58,12 +58,19 @@ export default function Login() {
         <div className="relative z-10 flex flex-col justify-between h-full">
 
           {/* Top logo */}
-          <div>
-            <div className="flex items-end gap-2">
-              <img src="/logo1.png" alt="AFN Logo" className="h-18 w-20" />
-              <span className="text-2xl font-bold tracking-wide">|AFN Portal</span>
-            </div>
-          </div>
+          <Link
+            to="/"
+            className="inline-flex items-end gap-2 transition-opacity hover:opacity-80"
+          >
+            <img
+              src="/logo1.png"
+              alt="AFN Logo"
+              className="h-18 w-20"
+            />
+            <span className="text-2xl font-bold tracking-wide">
+              |AFN Portal
+            </span>
+          </Link>
 
           {/* Middle content */}
           <div className="max-w-lg">

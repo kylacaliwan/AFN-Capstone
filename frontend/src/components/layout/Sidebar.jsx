@@ -244,122 +244,151 @@ export default function Sidebar({ user, isOpen, onClose }) {
       />
 
       {/* Sidebar */}
-      <aside
+      {/* Sidebar */}
+<aside
   className={`fixed top-0 left-0 z-40 flex h-screen w-[min(17rem,calc(100vw-2rem))] flex-col border-r border-brand-800/40 bg-brand-900 transition-transform duration-300 ease-in-out lg:w-64 ${
     isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
   }`}
 >
-        {/* Logo area */}
-        <div className="px-4 pb-7 pt-8">
-          <div className="flex items-start justify-center">
-            <img
-              src="/logo.png"
-              alt="AFN Solar Power Engineering Services"
-              className="h-auto w-[108px]"
-            />
-            <button
-              className="absolute right-4 top-4 rounded-lg p-1.5 text-brand-100 transition hover:bg-white/10 hover:text-white lg:hidden"
-              onClick={onClose}
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+  {/* Logo area */}
+  <div className="shrink-0 px-4 pb-7 pt-8">
+    <div className="flex items-start justify-center">
+      <img
+        src="/logo.png"
+        alt="AFN Solar Power Engineering Services"
+        className="h-auto w-[108px]"
+      />
+
+      <button
+        className="absolute right-4 top-4 rounded-lg p-1.5 text-brand-100 transition hover:bg-white/10 hover:text-white lg:hidden"
+        onClick={onClose}
+      >
+        <svg
+          className="h-5 w-5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M6 18L18 6M6 6l12 12"
+          />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  {/* Scrollable Navigation */}
+  <nav className="flex-1 min-h-0 overflow-y-auto px-4 py-2">
+    <div className="space-y-5 pb-4">
+      {menu.sections.map((section) => (
+        <div key={section.title}>
+          <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-200/70">
+            {section.title}
           </div>
-        </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 space-y-5 px-4 py-2">
-          {menu.sections.map((section) => (
-            <div key={section.title}>
-              <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-200/70">
-                {section.title}
-              </div>
-              <div className="space-y-1.5">
-                {section.items.map((item) => {
-                  const Icon = item.icon;
-                  const itemIsActive = isItemActive(item) && !item.disabled;
+          <div className="space-y-1.5">
+            {section.items.map((item) => {
+              const Icon = item.icon;
+              const itemIsActive = isItemActive(item) && !item.disabled;
 
-                  if (item.disabled) {
-                    return (
-                      <div
-                        key={item.path}
-                        title={item.title || ''}
-                        className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-[14px] text-slate-300"
-                      >
-                        <Icon size={16} className="shrink-0" />
-                        <span className="min-w-0 truncate">{item.label}</span>
-                      </div>
-                    );
+              if (item.disabled) {
+                return (
+                  <div
+                    key={item.path}
+                    title={item.title || ''}
+                    className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-[14px] text-slate-300"
+                  >
+                    <Icon size={16} className="shrink-0" />
+                    <span className="min-w-0 truncate">
+                      {item.label}
+                    </span>
+                  </div>
+                );
+              }
+
+              return (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  onClick={onClose}
+                  className={() =>
+                    `group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium transition-all duration-200 ${
+                      itemIsActive
+                        ? 'bg-white/12 text-white'
+                        : 'text-brand-100/70 hover:bg-white/10 hover:text-white'
+                    }`
                   }
+                >
+                  {itemIsActive && (
+                    <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-300" />
+                  )}
 
-                  return (
-                    <NavLink
-                      key={item.path}
-                      to={item.path}
-                      onClick={onClose}
-                      className={() =>
-                        `group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium transition-all duration-200 ${
+                  <Icon
+                    size={16}
+                    className={`shrink-0 transition-colors duration-200 ${
+                      itemIsActive
+                        ? 'text-brand-200'
+                        : 'text-brand-100/60 group-hover:text-brand-100'
+                    }`}
+                  />
+
+                  <span className="min-w-0 truncate">
+                    {item.label}
+                  </span>
+
+                  {item.badge !== undefined &&
+                    item.badge !== null && (
+                      <span
+                        className={`ml-auto inline-flex min-w-[22px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
                           itemIsActive
-                            ? 'bg-white/12 text-white'
-                            : 'text-brand-100/70 hover:bg-white/10 hover:text-white'
-                        }`
-                      }
-                    >
-                      {/* Active indicator bar */}
-                      {itemIsActive && (
-                        <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-300" />
-                      )}
-
-                      <Icon
-                        size={16}
-                        className={`shrink-0 transition-colors duration-200 ${
-                          itemIsActive ? 'text-brand-200' : 'text-brand-100/60 group-hover:text-brand-100'
+                            ? 'bg-brand-300/20 text-brand-100'
+                            : badgeColors[item.badgeTone] ||
+                              'bg-slate-100 text-slate-500'
                         }`}
-                      />
-                      <span className="min-w-0 truncate">{item.label}</span>
-
-                      {item.badge !== undefined && item.badge !== null && (
-                        <span
-                          className={`ml-auto inline-flex min-w-[22px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                            itemIsActive
-                              ? 'bg-brand-300/20 text-brand-100'
-                              : badgeColors[item.badgeTone] || 'bg-slate-100 text-slate-500'
-                          }`}
-                        >
-                          {item.badge}
-                        </span>
-                      )}
-                    </NavLink>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </nav>
-
-        {/* Bottom user section */}
-        <div className="mt-auto border-t border-white/10 bg-brand-800 px-5 py-4">
-          <div className="flex items-center gap-3">
-            <img
-              src="/user-icon.png"
-              alt=""
-              className="h-9 w-9 shrink-0 rounded-full"
-            />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[12px] font-medium text-white">{displayName}</p>
-              <p className="truncate text-[10px] uppercase text-brand-100/75">{role}</p>
-            </div>
+                      >
+                        {item.badge}
+                      </span>
+                    )}
+                </NavLink>
+              );
+            })}
           </div>
-          <button
-            type="button"
-            onClick={logout}
-            className="mt-3 w-full rounded-[8px] bg-white/10 px-4 py-2 text-[11px] font-medium text-white ring-1 ring-white/10 transition hover:bg-white/15"
-          >
-            Logout
-          </button>
         </div>
-      </aside>
+      ))}
+    </div>
+  </nav>
+
+  {/* Fixed Bottom User Section */}
+  <div className="shrink-0 border-t border-white/10 bg-brand-800 px-5 py-4">
+    <div className="flex items-center gap-3">
+      <img
+        src="/user-icon.png"
+        alt=""
+        className="h-9 w-9 shrink-0 rounded-full"
+      />
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[12px] font-medium text-white">
+          {displayName}
+        </p>
+        <p className="truncate text-[10px] uppercase text-brand-100/75">
+          {role}
+        </p>
+      </div>
+    </div>
+
+    <button
+      type="button"
+      onClick={logout}
+      className="mt-3 w-full rounded-[8px] bg-white/10 px-4 py-2 text-[11px] font-medium text-white ring-1 ring-white/10 transition hover:bg-white/15"
+    >
+      Logout
+    </button>
+  </div>
+</aside>
     </>
   );
 }

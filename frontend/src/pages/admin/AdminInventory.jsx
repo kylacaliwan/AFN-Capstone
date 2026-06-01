@@ -235,7 +235,6 @@ export default function AdminInventory() {
       <div className="card mb-4 flex flex-col gap-4 p-5 xl:flex-row xl:items-end xl:justify-between">
         <div className="flex-1">
           <h2 className="text-lg font-semibold text-slate-900">Inventory Management</h2>
-          <p className="mt-1 text-sm text-slate-500">Track stock levels, item categories, and replenishment risk.</p>
           <div className="mt-4 max-w-xl">
             <label className="mb-2 block text-sm font-semibold text-slate-700">Search inventory</label>
             <input

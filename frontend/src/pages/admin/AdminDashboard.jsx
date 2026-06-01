@@ -174,7 +174,6 @@ export default function AdminDashboard() {
             icon={FiClipboard}
             accent="amber"
             color="text-amber-600"
-            trendLabel="Service requests waiting for admin approval"
           />
           <StatsCard
             title="Active Tickets"
@@ -182,7 +181,6 @@ export default function AdminDashboard() {
             icon={FiTrendingUp}
             accent="blue"
             color="text-brand-600"
-            trendLabel="Open service tickets still in progress"
           />
           <StatsCard
             title="Completed Today"
@@ -190,7 +188,6 @@ export default function AdminDashboard() {
             icon={FiCheckCircle}
             accent="emerald"
             color="text-emerald-600"
-            trendLabel="Tickets marked completed today"
           />
         </div>
 

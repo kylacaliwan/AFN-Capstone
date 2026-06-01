@@ -161,15 +161,7 @@ export default function TechnicianSchedule() {
 
   return (
     <Layout>
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">My Schedule</h2>
-          <p className="mt-1 text-sm text-slate-500">Calendar view with color-coded job status.</p>
-        </div>
-        <button onClick={loadSchedule} disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-5 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50">
-          <FiRefreshCw className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
-      </div>
+      
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
