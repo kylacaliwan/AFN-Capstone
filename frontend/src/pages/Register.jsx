@@ -76,7 +76,7 @@ export default function Register() {
 
       <div
         className="hidden lg:flex lg:w-[45%] xl:w-[70%] flex-col justify-between 
-        bg-[url('/register-bg.jpg')] bg-cover bg-left 
+        bg-[url('/register-bg.png')] bg-cover bg-left 
         p-10 xl:p-8 text-white relative overflow-hidden"
       >
         <div className="absolute inset-0 bg-black/70 z-0" />

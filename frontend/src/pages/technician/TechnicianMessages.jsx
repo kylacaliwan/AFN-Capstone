@@ -178,18 +178,6 @@ export default function TechnicianMessages() {
   return (
     <Layout>
       <div className="mx-auto max-w-7xl">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-2xl font-semibold text-slate-950">Messages</h2>
-          <button
-            type="button"
-            onClick={() => loadMessages()}
-            disabled={loading}
-            className="grid h-10 w-10 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
-            title="Refresh"
-          >
-            <FiRefreshCw size={17} className={loading ? 'animate-spin' : ''} />
-          </button>
-        </div>
 
         {statusMessage && (
           <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -202,8 +190,8 @@ export default function TechnicianMessages() {
           </div>
         )}
 
-        <div className="grid min-h-[72vh] grid-cols-1 overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white shadow-sm lg:h-[720px] lg:grid-cols-[360px_1fr]">
-          <aside className="flex max-h-96 flex-col border-b border-slate-200 bg-white lg:max-h-none lg:border-b-0 lg:border-r">
+        <div className="grid h-[calc(100vh-180px)] min-h-[500px] grid-cols-1 overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white shadow-sm lg:grid-cols-[340px_1fr]">
+         <aside className="flex min-h-0 h-full flex-col border-b border-slate-200 bg-white lg:border-b-0 lg:border-r">
             <div className="border-b border-slate-100 px-5 py-4">
               <div className="relative">
                 <input
@@ -214,7 +202,7 @@ export default function TechnicianMessages() {
                 />
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-2 py-2">
+            <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
               {loading ? (
                 <div className="p-4 text-sm text-slate-500">Loading messages...</div>
               ) : rooms.length === 0 ? (
@@ -250,7 +238,7 @@ export default function TechnicianMessages() {
             </div>
           </aside>
 
-          <section className="flex min-h-[36rem] flex-col bg-slate-50">
+          <section className="flex min-h-0 h-full flex-col bg-slate-50">
             <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4">
               <div className="flex min-w-0 items-center gap-3">
                 <div className={`grid h-11 w-11 flex-none place-items-center rounded-full text-sm font-bold text-white ${

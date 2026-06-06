@@ -1,0 +1,31 @@
+[33mf0c1fdf[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m update ui
+[33m04138f8[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m updated small details
+[33m6cf624e[m updated daw
+[33m5096794[m fix: align admin workspace access cleanup
+[33ma122ed9[m chore: add Docker and automation workflow
+[33mf83886e[m refactor: reorganize frontend workspace
+[33m16f388e[m refactor: reorganize backend modules and workflows
+[33m93b1bd5[m chore: organize docs and remove ad hoc scripts
+[33m89138d1[m chore: remove generated cleanup artifacts
+[33m8b15661[m Fix: Move daphne before staticfiles in INSTALLED_APPS
+[33m5cdcfe2[m Add PythonAnywhere deployment guide for full stack
+[33m080dcf2[m Add Railway deployment configuration for Django backend
+[33m873c16e[m Trigger final rebuild with corrected dist placement
+[33m4eddd0e[m Move built dist folder to root level for Vercel
+[33mb4f8c8f[m Rebuild with corrected output directory
+[33mb1173ea[m Fix output directory path
+[33m0749853[m Clear cache - rebuild with explicit build command
+[33m162f509[m Explicit build command in vercel.json
+[33m7902fef[m Trigger rebuild with simplified config
+[33m42c62e1[m Simplify Vercel configuration - use root package.json build script
+[33m2b724df[m Trigger Vercel deployment from main branch
+[33ma06bdeb[m Use npm prefix flag for frontend build
+[33m018162b[m Add Vercel ignore file
+[33ma9b0f48[m Add root package.json for build and simplify vercel.json
+[33m794e3da[m Use Vercel static-build configuration for frontend
+[33mf16042b[m Include npm install in Vercel build command
+[33ma724e85[m Fix Vercel build command to target frontend directory
+[33mfe31250[m Update Vercel configuration
+[33m692b9f6[m Add Vercel configuration for frontend deployment
+[33mac89a72[m Add all project files: complete frontend and backend implementation
+[33md4f0594[m Initial commit: Full application stack with backend and frontend

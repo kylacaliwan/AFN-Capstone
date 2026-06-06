@@ -153,35 +153,74 @@ export default function ClientServiceRequests() {
     }
   };
 
-  const selectSearchResult = (result) => {
-    const lat = parseFloat(result.lat);
-    const lng = parseFloat(result.lon);
-    const [clat, clng] = clampToCalabarzon(lat, lng);
-    setLatitude(clat);
-    setLongitude(clng);
-    setMapCenter([clat, clng]);
-    setAddress((result.display_name || '').split(',')[0]);
-    setSearchQuery('');
-    setSearchResults([]);
-  };
+const selectSearchResult = async (result) => {
+  const lat = parseFloat(result.lat);
+  const lng = parseFloat(result.lon);
+
+  const [clat, clng] = clampToCalabarzon(lat, lng);
+
+  setLatitude(clat);
+  setLongitude(clng);
+  setMapCenter([clat, clng]);
+
+  setSearchQuery('');
+  setSearchResults([]);
+
+  await reverseGeocode(clat, clng);
+};
 
   // Reverse geocoding: Get address from coordinates
-  const reverseGeocode = async (lat, lng) => {
-    try {
-      const result = await reverseGeocodeLocation({ lat, lng });
-      if (result.address) {
-        const road = result.address.road || result.address.name || '';
-        const city = result.address.city || result.address.town || result.address.village || '';
-        const province = result.address.state || result.address.province || '';
+ const reverseGeocode = async (lat, lng) => {
+  try {
+    const result = await reverseGeocodeLocation({ lat, lng });
 
-        setAddress(road || result.display_name.split(',')[0]);
-        setCity(city);
-        setProvince(province);
-      }
-    } catch (err) {
-      setSubmitError(err.message || 'Could not read address from the selected pin.');
-    }
-  };
+    if (!result) return;
+
+    const addr = result.address || {};
+
+    const houseNumber = addr.house_number || '';
+    const road = addr.road || addr.street || '';
+    const barangay =
+      addr.village ||
+      addr.hamlet ||
+      addr.suburb ||
+      addr.neighbourhood ||
+      '';
+
+    const cityName =
+      addr.city ||
+      addr.town ||
+      addr.municipality ||
+      '';
+
+    const provinceName =
+      addr.state ||
+      addr.province ||
+      '';
+
+    const fullAddress = [
+      houseNumber,
+      road,
+      barangay,
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+    setAddress(
+      fullAddress ||
+      result.display_name ||
+      ''
+    );
+
+    setCity(cityName);
+    setProvince(provinceName);
+  } catch (err) {
+    setSubmitError(
+      err.message ||
+      'Could not read address from selected location.'
+    );
+  }
+};
 
   // Handle map location change (when user clicks on map)
   const handleLocationChange = (lat, lng) => {
@@ -202,11 +241,6 @@ export default function ClientServiceRequests() {
     if (!serviceTypeIds.every((serviceTypeId) => serviceTypes.some((serviceType) => String(serviceType.id) === String(serviceTypeId)))) {
       setMessage('');
       setSubmitError('Please choose only available service types.');
-      return;
-    }
-    if (!notes.trim()) {
-      setMessage('');
-      setSubmitError('Please add a short description of the request.');
       return;
     }
     if (latitude == null || longitude == null) {
@@ -241,7 +275,7 @@ export default function ClientServiceRequests() {
       const createdRequest = await createServiceRequest({
         service_type: Number(serviceTypeIds[0]),
         service_types: serviceTypeIds.map((serviceTypeId) => Number(serviceTypeId)),
-        description: notes.trim(),
+        description: notes.trim() || 'No additional details provided.',
         priority: 'Normal',
         preferred_date: preferredDate || null,
         preferred_time_slot: preferredTimeSlot || null,
@@ -282,10 +316,7 @@ export default function ClientServiceRequests() {
 
   return (
     <Layout>
-      <section className="card p-5">
-        <h2 className="text-lg font-semibold text-slate-900">Create Service Request</h2>
-        <p className="mt-1 text-sm text-slate-500">Tell us what you need, choose a preferred schedule, and pin the service location.</p>
-      </section>
+      
       {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>}
       <div className="mt-4 grid gap-5 lg:grid-cols-2">
         <form onSubmit={createRequest} className="card space-y-4 p-5">
@@ -386,18 +417,10 @@ export default function ClientServiceRequests() {
             </div>
           </div>
           <div>
-            <label className={labelClass}>Scheduling Notes</label>
-            <textarea
-              value={schedulingNotes}
-              onChange={(e) => setSchedulingNotes(e.target.value)}
-              className={inputClass}
-              rows="2"
-              placeholder="Gate access, best contact time, building rules, or timing preferences."
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Request Details</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} rows="3" />
+            <label className={labelClass}>
+              Request Details <span className="text-slate-400">(Optional)</span>
+            </label>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} rows="3" placeholder="Describe your request"  />
           </div>
           <button
             type="submit"
@@ -467,26 +490,42 @@ export default function ClientServiceRequests() {
             Selected location: {latitude != null ? latitude.toFixed(6) : 'unset'} , {longitude != null ? longitude.toFixed(6) : 'unset'}
           </div>
           <button type="button" onClick={() => {
-            navigator.geolocation.getCurrentPosition((pos) => {
-              const rawLat = pos.coords.latitude;
-              const rawLng = pos.coords.longitude;
-              const [clat, clng] = clampToCalabarzon(rawLat, rawLng);
-              setLatitude(clat);
-              setLongitude(clng);
-              setMapCenter([clat, clng]);
-              setSubmitError('');
-              const moved =
-                Math.abs(clat - rawLat) > 0.0005 || Math.abs(clng - rawLng) > 0.0005;
-              setMessage(
-                moved
-                  ? 'Your position was outside Calabarzon; the pin was moved to the nearest point inside the service area.'
-                  : 'Using your current location for the pin.'
-              );
-            }, () => {
-              setMessage('');
-              setSubmitError('Could not get current location.');
-            });
-          }} className="mt-2 rounded-xl bg-brand-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-600">Use My Location</button>
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const rawLat = pos.coords.latitude;
+      const rawLng = pos.coords.longitude;
+
+      const [clat, clng] = clampToCalabarzon(
+        rawLat,
+        rawLng
+      );
+
+      setLatitude(clat);
+      setLongitude(clng);
+      setMapCenter([clat, clng]);
+
+      await reverseGeocode(clat, clng);
+
+      setSubmitError('');
+
+      const moved =
+        Math.abs(clat - rawLat) > 0.0005 ||
+        Math.abs(clng - rawLng) > 0.0005;
+
+      setMessage(
+        moved
+          ? 'Your position was outside Calabarzon; the pin was moved to the nxearest point inside the service area.'
+          : 'Using your current location.'
+      );
+    },
+    () => {
+      setMessage('')
+      setSubmitError(
+        'Could not get current location.'
+      );
+    }
+  );
+}} className="mt-2 rounded-xl bg-brand-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-600">Use My Location</button>
 
           <h3 className="mt-5 text-lg font-semibold text-slate-900">My Service Tickets</h3>
           <ul className="mt-2 space-y-1 text-sm text-slate-600">

@@ -168,15 +168,7 @@ export default function TechnicianDashboard() {
         <p className="text-sm text-slate-500">
           Last updated: <span className="font-medium text-slate-700">{formatDateTime(lastUpdated)}</span>
         </p>
-        <button
-          type="button"
-          onClick={() => loadData({ silent: true })}
-          disabled={refreshing}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-60"
-        >
-          <FiRefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-          {refreshing ? 'Refreshing' : 'Refresh'}
-        </button>
+        
       </div>
 
       {actionMessage && (
@@ -197,7 +189,7 @@ export default function TechnicianDashboard() {
 
       {/* Current Focus + GPS */}
       <div className="mt-6 grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
-        <section className="card p-5">
+        <section className="card min-h-full p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Current Focus</p>
@@ -210,9 +202,15 @@ export default function TechnicianDashboard() {
                   : 'When a job is assigned or started, it will appear here.'}
               </p>
             </div>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${currentJob ? 'bg-brand-100 text-brand-700' : 'bg-surface-100 text-slate-500'}`}>
+            <div className="flex flex-col self-stretch items-end">
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${currentJob ? 'bg-brand-100 text-brand-700' : 'bg-surface-100 text-slate-500'}`}>
               {currentJob ? formatStatusLabel(currentJob.status) : 'Idle'}
-            </span>
+              </span>
+              <div className="mt-auto pt-4">
+                {canOpenSchedule && <Link to="/technician/schedule" className="inline-flex rounded-xl bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600">Check Schedule</Link>}
+              </div>
+
+            </div>
           </div>
 
           {currentJob ? (
@@ -287,7 +285,7 @@ export default function TechnicianDashboard() {
               </div>
             </>
           ) : (
-            <div className="mt-5">
+            <div className="hidden mt-5">
               {canOpenSchedule && <Link to="/technician/schedule" className="inline-flex rounded-xl bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600">Check Schedule</Link>}
             </div>
           )}

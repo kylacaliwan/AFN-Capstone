@@ -73,7 +73,6 @@ export default function ClientRequestTracking() {
     <Layout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-semibold text-slate-800">My Service Requests</h2>
           <button
             onClick={() => navigate('/client/service-requests')}
             className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600"
@@ -193,7 +192,7 @@ export default function ClientRequestTracking() {
                 className="rounded-lg bg-white p-5 shadow-sm border border-slate-200 hover:shadow-md transition cursor-pointer"
                 onClick={() => handleViewDetail(request.id)}
               >
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex items-stretch justify-between gap-4">
                   {/* Left Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-3">
@@ -221,17 +220,6 @@ export default function ClientRequestTracking() {
                           <p className="text-slate-500 text-xs">Location</p>
                           <p className="text-slate-700 truncate">
                             {request.address || 'Not specified'}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Request Date */}
-                      <div className="flex items-start gap-2">
-                        <FiCalendar className="text-slate-400 flex-shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-slate-500 text-xs">Requested</p>
-                          <p className="text-slate-700">
-                            {formatDate(request.request_date)}
                           </p>
                         </div>
                       </div>
@@ -293,8 +281,20 @@ export default function ClientRequestTracking() {
                   </div>
 
                   {/* Arrow Icon */}
-                  <div className="flex-shrink-0 text-slate-300 mt-1">
-                    <FiArrowRight className="w-5 h-5" />
+                  <div className="flex flex-col justify-between items-end">
+                    <div>
+                        <FiArrowRight className="w-5 h-5" />
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <FiCalendar className="text-slate-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-slate-500 text-xs">Requested</p>
+                          <p className="text-slate-700">
+                            {formatDate(request.request_date)}
+                          </p>
+                        </div>
+                      </div>
+                  
                   </div>
                 </div>
               </div>

@@ -70,7 +70,7 @@ export default function LandingPage() {
                 <img
                   src="/hero-bg.png"
                   alt="Solar CCTV Aircon"
-                  className="w-full h-full object-cover"
+                  className="w-full bg-left h-full object-cover"
                 />
                 
               </div>

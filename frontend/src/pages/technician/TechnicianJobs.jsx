@@ -91,12 +91,7 @@ export default function TechnicianJobs() {
     <Layout>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-semibold text-slate-800">My Jobs ({jobs.length})</h2>
-        <button
-          onClick={loadJobs}
-          className="rounded-lg bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
-        >
-          Refresh
-        </button>
+
       </div>
 
       {/* Active Job Banner */}

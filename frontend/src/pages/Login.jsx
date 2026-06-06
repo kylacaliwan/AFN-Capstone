@@ -44,7 +44,7 @@ export default function Login() {
     <div className="flex min-h-screen">
       {/* Left brand panel */}
       <div className="hidden lg:flex lg:w-[45%] xl:w-[70%] flex-col justify-between 
-      bg-[url('/login-bg.jpg')] bg-cover bg-left 
+      bg-[url('/login-bg.png')] bg-cover bg-left 
       p-10 xl:p-8 text-white relative overflow-hidden">
 
         {/* Dark overlay */}

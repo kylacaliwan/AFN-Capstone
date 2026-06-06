@@ -211,7 +211,7 @@ const handleRefresh = async () => {
 
   return (
     <header className="sticky top-0 z-20 bg-transparent px-3 py-2 sm:px-5 lg:px-6">
-      <div className="rounded-[14px] border border-brand-200/80 bg-white/95 px-4 py-3 shadow-[0_10px_24px_rgba(8,47,99,0.10)] sm:px-5 lg:px-6">
+      <div className="rounded-[14px] px-4 py-3  sm:px-5 lg:px-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         {/* Left: hamburger + breadcrumb */}
         <div className="flex min-w-0 items-center gap-3">
@@ -237,12 +237,9 @@ const handleRefresh = async () => {
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-brand-600">
               {activeRoute?.section || activeRole?.workspace || 'Portal'}
             </p>
-            <h1 className="mt-1 truncate text-[24px] font-semibold leading-tight text-slate-950 sm:text-[28px]">
+            <h1 className="mt-1 truncate text-[24px] font-bold leading-tight text-slate-950 sm:text-[28px]">
               {activeRoute?.title || 'AFN Service Management'}
             </h1>
-            <p className="mt-1 hidden text-[14px] text-slate-500 md:block">
-              {activeRoute?.subtitle || 'Use the sidebar to navigate your workspace.'}
-            </p>
           </div>
           )}
         </div>
