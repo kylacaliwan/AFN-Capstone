@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   FiActivity,
@@ -185,12 +185,23 @@ const badgeColors = {
 
 export default function Sidebar({ user, isOpen, onClose }) {
   const { logout } = useAuth();
+  const navRef = useRef(null);
   const location = useLocation();
   const [afterSalesStats, setAfterSalesStats] = useState(null);
   const role = user?.role;
   const afterSalesItems = canAccessAfterSalesFeatures(user) ? getAfterSalesItems(afterSalesStats, user) : [];
   const shouldLoadAfterSalesStats =
     canAccessAfterSalesFeatures(user) && hasAnyCapability(user, AFTER_SALES_DASHBOARD_CAPABILITIES);
+
+  useEffect(() => {
+  const savedPosition = sessionStorage.getItem(
+    'sidebarScrollPosition'
+  );
+
+  if (navRef.current && savedPosition) {
+    navRef.current.scrollTop = Number(savedPosition);
+  }
+}, [location.pathname]);
 
   useEffect(() => {
     let isMounted = true;
@@ -240,7 +251,14 @@ export default function Sidebar({ user, isOpen, onClose }) {
         className={`fixed inset-0 z-20 bg-slate-950/40 backdrop-blur-sm transition-opacity lg:hidden ${
           isOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
         }`}
-        onClick={onClose}
+        onClick={() => {
+          sessionStorage.setItem(
+            'sidebarScrollPosition',
+            navRef.current?.scrollTop || 0
+          );
+
+          onClose?.();
+        }}
       />
 
       {/* Sidebar */}
@@ -261,7 +279,14 @@ export default function Sidebar({ user, isOpen, onClose }) {
 
       <button
         className="absolute right-4 top-4 rounded-lg p-1.5 text-brand-100 transition hover:bg-white/10 hover:text-white lg:hidden"
-        onClick={onClose}
+        onClick={() => {
+          sessionStorage.setItem(
+            'sidebarScrollPosition',
+            navRef.current?.scrollTop || 0
+          );
+
+          onClose?.();
+        }}
       >
         <svg
           className="h-5 w-5"
@@ -281,7 +306,8 @@ export default function Sidebar({ user, isOpen, onClose }) {
   </div>
 
   {/* Scrollable Navigation */}
-  <nav className="flex-1 min-h-0 overflow-y-auto px-4 py-2">
+  <nav ref={navRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-2"
+>
     <div className="space-y-5 pb-4">
       {menu.sections.map((section) => (
         <div key={section.title}>
@@ -313,7 +339,14 @@ export default function Sidebar({ user, isOpen, onClose }) {
                 <NavLink
                   key={item.path}
                   to={item.path}
-                  onClick={onClose}
+                  onClick={() => {
+                    sessionStorage.setItem(
+                      'sidebarScrollPosition',
+                      navRef.current?.scrollTop || 0
+                    );
+
+                    onClose?.();
+                  }}
                   className={() =>
                     `group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium transition-all duration-200 ${
                       itemIsActive

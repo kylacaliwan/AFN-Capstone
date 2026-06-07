@@ -133,33 +133,6 @@ export default function AdminDashboard() {
           <p className="text-sm text-slate-500">
             Last updated: <span className="font-medium text-slate-700">{formatDateTime(lastUpdated)}</span>
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-              {canOpenUsers && (
-                <button
-                  type="button"
-                  onClick={() => navigate('/admin/user-management')}
-                  className="rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-surface-50"
-                >
-                  Users
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => navigate('/admin/analytics')}
-                className="rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-surface-50"
-              >
-                Analytics
-              </button>
-              <button
-                type="button"
-                onClick={() => loadDashboard({ silent: true })}
-                disabled={refreshing}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-60"
-              >
-                <FiRefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Refreshing' : 'Refresh'}
-              </button>
-          </div>
         </div>
 
         {error && (
@@ -167,7 +140,7 @@ export default function AdminDashboard() {
         )}
 
         {/* ── Stat cards ── */}
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-4">
           <StatsCard
             title="Pending Approvals"
             value={pendingApprovalsCount}
@@ -185,6 +158,13 @@ export default function AdminDashboard() {
           <StatsCard
             title="Completed Today"
             value={completedTodayCount}
+            icon={FiCheckCircle}
+            accent="emerald"
+            color="text-emerald-600"
+          />
+          <StatsCard
+            title="Available Technicians"
+            value={activeTechniciansCount}
             icon={FiCheckCircle}
             accent="emerald"
             color="text-emerald-600"
@@ -221,16 +201,6 @@ export default function AdminDashboard() {
               ))}
           </div>
         )}
-
-        {/* ── Active Technicians ── */}
-        <div className="flex items-center gap-2.5 text-sm text-slate-500">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 text-violet-500">
-            <FiUsers className="h-4 w-4" />
-          </div>
-          <span>
-            <span className="font-semibold text-slate-800">{activeTechniciansCount}</span> technicians currently active or available for field work
-          </span>
-        </div>
 
         {/* ── Two-column: Approvals + Schedule ── */}
         <div className="grid gap-5 xl:grid-cols-2">

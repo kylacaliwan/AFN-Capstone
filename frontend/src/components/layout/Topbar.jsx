@@ -59,14 +59,6 @@ const routeMeta = [
   { prefix: '/client/profile', section: 'Account', title: 'Profile', subtitle: 'Manage your contact details and account.' }
 ];
 
-const quietHeaderPrefixes = [
-  '/admin/calendar',
-  '/admin/service-tickets',
-  '/admin/dispatch-board',
-  '/admin/coverage-heatmap',
-  '/admin/services',
-  '/admin/reports'
-];
 
 const getRoleMeta = (user, workspaceRole) => {
   switch (workspaceRole) {
@@ -150,8 +142,7 @@ const handleRefresh = async () => {
     () => routeMeta.find((item) => location.pathname.startsWith(item.prefix)),
     [location.pathname]
   );
-  const hideRouteText = quietHeaderPrefixes.some((prefix) => location.pathname.startsWith(prefix));
-
+  
   const activeRole = getRoleMeta(user, getWorkspaceRole(location.pathname, user?.role));
   const primaryAction = activeRole && activeRole.action?.path !== location.pathname ? activeRole.action : null;
   const notificationsTarget = activeRole?.notificationsTarget || null;
@@ -222,8 +213,7 @@ const handleRefresh = async () => {
             <FiMenu size={18} />
           </button>
 
-          {!hideRouteText && (
-          <div className="min-w-0">
+         <div className="min-w-0">
             {/* Breadcrumb */}
             {activeRoute?.section && (
               <div className="hidden items-center gap-1.5 text-[12px] font-medium text-slate-500 sm:flex lg:hidden">
@@ -234,14 +224,21 @@ const handleRefresh = async () => {
                 <span className="text-slate-600">{activeRoute.title}</span>
               </div>
             )}
+
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-brand-600">
               {activeRoute?.section || activeRole?.workspace || 'Portal'}
             </p>
+
             <h1 className="mt-1 truncate text-[24px] font-bold leading-tight text-slate-950 sm:text-[28px]">
               {activeRoute?.title || 'AFN Service Management'}
             </h1>
+
+            {activeRoute?.subtitle && (
+              <p className="mt-1 text-sm text-slate-500">
+                {activeRoute.subtitle}
+              </p>
+            )}
           </div>
-          )}
         </div>
 
         {/* Right: actions */}

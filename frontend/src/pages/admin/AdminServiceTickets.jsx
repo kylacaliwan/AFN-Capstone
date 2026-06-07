@@ -269,22 +269,10 @@ export default function AdminServiceTickets() {
               {showWalkInForm ? 'Close Walk-in Form' : 'Create Walk-in Request'}
             </button>
             <button
-              onClick={() => navigate('/admin/dispatch-board')}
-              className="inline-flex items-center justify-center rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-surface-50"
-            >
-              <FiMap className="mr-2" /> Open Dispatch Board
-            </button>
-            <button
               onClick={() => navigate('/admin/job-history')}
               className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
             >
               <FiCheck className="mr-2" /> Job History
-            </button>
-            <button
-              onClick={loadData}
-              className="inline-flex items-center justify-center rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600"
-            >
-              <FiRefreshCw className="mr-2" /> Refresh Queue
             </button>
         </div>
       </section>

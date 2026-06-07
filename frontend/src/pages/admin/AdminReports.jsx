@@ -50,6 +50,7 @@ export default function AdminReports() {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  
 
   // Filter states
   const [dateFrom, setDateFrom] = useState('');
@@ -57,6 +58,9 @@ export default function AdminReports() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [priorityFilter, setPriorityFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+
+const ITEMS_PER_PAGE = 10;
+const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     fetchServiceTickets();
@@ -103,6 +107,13 @@ export default function AdminReports() {
       return true;
     });
   }, [tickets, dateFrom, dateTo, statusFilter, priorityFilter, searchTerm]);
+
+  const totalPages = Math.ceil(filteredTickets.length / ITEMS_PER_PAGE);
+
+const paginatedTickets = filteredTickets.slice(
+  (currentPage - 1) * ITEMS_PER_PAGE,
+  currentPage * ITEMS_PER_PAGE
+);
 
   // Calculate summary stats from the same rows shown/exported by the report.
   const summaryStats = useMemo(() => {
@@ -233,10 +244,7 @@ export default function AdminReports() {
 
         {/* Export Buttons */}
         <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-          <div className="text-sm text-slate-600">
-            Showing {filteredTickets.length} of {tickets.length} tickets
-          </div>
-          <div className="flex gap-3">
+          <div className="flex w-full justify-end gap-3">
             <button
               onClick={printReport}
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
@@ -287,7 +295,7 @@ export default function AdminReports() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-200">
-                  {filteredTickets.map((ticket) => (
+                  {paginatedTickets.map((ticket) => (
                     <tr key={ticket.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-slate-900">
                         {formatTicketId(ticket.id)}
@@ -338,6 +346,35 @@ export default function AdminReports() {
                   ))}
                 </tbody>
               </table>
+              <div className="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-3">
+  <div className="text-sm text-slate-500">
+    Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} -
+    {Math.min(currentPage * ITEMS_PER_PAGE, filteredTickets.length)}
+    of {filteredTickets.length}
+  </div>
+
+  <div className="flex items-center gap-2">
+    <button
+      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+      disabled={currentPage === 1}
+      className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+    >
+      Previous
+    </button>
+
+    <span className="px-3 text-sm font-medium">
+      Page {currentPage} of {totalPages}
+    </span>
+
+    <button
+      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+      disabled={currentPage === totalPages}
+      className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+    >
+      Next
+    </button>
+  </div>
+</div>
             </div>
           )}
         </div>

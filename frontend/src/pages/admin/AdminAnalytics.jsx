@@ -717,24 +717,6 @@ export default function AdminAnalytics() {
               <span className="text-slate-400">{formatDateTime(lastUpdated)}</span>
             </p>
           </div>
-
-          <div className="flex items-center gap-3 text-xs text-slate-500">
-            <span className="rounded-full bg-sky-100 px-2.5 py-1 text-sky-700">
-              {formatCompactNumber(analytics?.avgResponseTime ?? overview.avgResponseTimeHours)}h avg assignment delay
-            </span>
-            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-700">
-              {formatCompactNumber(analytics?.avgCompletionTime ?? overview.avgCompletionTimeHours)}h avg work duration
-            </span>
-            <button
-              type="button"
-              onClick={() => loadAnalytics({ silent: true })}
-              disabled={refreshing}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
-            >
-              <FiRefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              {refreshing ? 'Refreshing' : 'Refresh'}
-            </button>
-          </div>
         </div>
 
         {/* ── Date Filter Bar ── */}

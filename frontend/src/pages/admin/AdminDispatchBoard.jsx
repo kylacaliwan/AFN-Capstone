@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FiUser, FiAlertCircle, FiFilter, FiCheckCircle } from 'react-icons/fi';
+import { FiUser, FiAlertCircle, FiFilter, FiCheckCircle, FiClipboard } from 'react-icons/fi';
 import Layout from '../../components/layout/Layout';
 import StatusBadge from '../../components/ui/StatusBadge';
 import SLABadge, { formatSlaSummary } from '../../components/ui/SLABadge';
@@ -68,6 +68,8 @@ const sortByDispatchUrgency = (firstTicket, secondTicket) => {
 };
 
 export default function AdminDispatchBoard() {
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
   const [tickets, setTickets] = useState([]);
   const [technicians, setTechnicians] = useState([]);
   const [serviceTypes, setServiceTypes] = useState([]);
@@ -209,6 +211,12 @@ export default function AdminDispatchBoard() {
   const assignedTickets = tickets
     .filter((ticket) => ticket.assignedTechnicianId && !['completed', 'cancelled'].includes(ticket.status))
     .sort((firstTicket, secondTicket) => new Date(secondTicket.assignedAt || 0) - new Date(firstTicket.assignedAt || 0));
+  const totalPages = Math.ceil(assignedTickets.length / ITEMS_PER_PAGE);
+
+const paginatedAssignedTickets = assignedTickets.slice(
+  (currentPage - 1) * ITEMS_PER_PAGE,
+  currentPage * ITEMS_PER_PAGE
+);
   const skillOptions = [
     { value: 'all', label: 'All Skills' },
     ...serviceTypes.map((serviceType) => ({
@@ -534,83 +542,211 @@ export default function AdminDispatchBoard() {
           </h3>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1120px] text-sm">
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Ticket</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Service / Client</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Assigned To</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Assigned By</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Assigned Time</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Timing</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Crew</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Action</th>
+                <th className="px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Ticket
+                </th>
+
+                <th className="px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Service / Client
+                </th>
+
+                <th className="px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Assigned To
+                </th>
+
+                <th className="hidden xl:table-cell px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Assigned By
+                </th>
+
+                <th className="hidden lg:table-cell px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Assigned Time
+                </th>
+
+                <th className="px-3 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Status
+                </th>
+
+                <th className="hidden lg:table-cell px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Crew
+                </th>
+
+                <th className="px-3 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Action
+                </th>
               </tr>
             </thead>
+
             <tbody>
               {assignedTickets.length > 0 ? (
-                assignedTickets.map((ticket, index) => (
+                paginatedAssignedTickets.map((ticket, index) => (
                   <tr
                     key={ticket.id}
-                    className={`border-b border-slate-100 ${
-                      selectedTicket?.id === ticket.id
-                        ? 'bg-blue-50'
-                        : index % 2 === 1
-                          ? 'bg-slate-50/60'
+                    className={`
+                      border-b border-slate-100 transition-colors
+                      hover:bg-sky-50/60
+                      ${
+                        selectedTicket?.id === ticket.id
+                          ? 'bg-blue-50'
+                          : index % 2 === 1
+                          ? 'bg-slate-50/40'
                           : ''
-                    }`}
+                      }
+                    `}
                   >
-                    <td className="px-3 py-3 font-bold text-blue-700">{formatTicketId(ticket.id)}</td>
+                    {/* Ticket */}
                     <td className="px-3 py-3">
-                      <div className="font-semibold text-slate-900">{ticket.service}</div>
-                      <div className="text-xs text-slate-500">
-                        Client {formatClientId(ticket.clientId)} - {ticket.clientFullname || ticket.client}
+                      <span className="font-semibold text-blue-700">
+                        {formatTicketId(ticket.id)}
+                      </span>
+                    </td>
+
+                    {/* Service / Client */}
+                    <td className="px-3 py-3">
+                      <div className="space-y-1">
+                        <div className="font-medium text-slate-900">
+                          {ticket.service}
+                        </div>
+
+                        <div className="text-xs text-slate-500">
+                          Client {formatClientId(ticket.clientId)}
+                        </div>
+
+                        <div className="truncate text-xs text-slate-500">
+                          {ticket.clientFullname || ticket.client}
+                        </div>
+
+                        <span className="inline-flex rounded-md bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                          {ticket.requestSourceLabel}
+                        </span>
                       </div>
-                      <div className="mt-1 text-xs font-semibold text-sky-700">{ticket.requestSourceLabel}</div>
                     </td>
+
+                    {/* Assigned To */}
                     <td className="px-3 py-3">
-                      <div className="font-semibold text-slate-900">{ticket.technicianFullname || ticket.assignedTech}</div>
-                      <div className="text-xs text-slate-500">Technician {formatTechnicianId(ticket.assignedTechnicianId)}</div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="font-semibold text-slate-900">{ticket.assignedByName || 'System'}</div>
-                      <div className="text-xs text-slate-500">
-                        {ticket.assignedById
-                          ? `${ticket.assignedByRole || 'admin'} ${formatRoleId(ticket.assignedByRole || 'admin', ticket.assignedById)}`
-                          : 'Auto or legacy assignment'}
+                      <div>
+                        <div className="font-medium text-slate-900">
+                          {ticket.technicianFullname || ticket.assignedTech}
+                        </div>
+
+                        <div className="text-xs text-slate-500">
+                          {formatTechnicianId(ticket.assignedTechnicianId)}
+                        </div>
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-slate-600">{formatAssignedAt(ticket.assignedAt)}</td>
-                    <td className="px-3 py-3"><StatusBadge status={ticket.status} size="sm" /></td>
-                    <td className="px-3 py-3">
-                      <div className="flex min-w-[180px] flex-col gap-1.5">
-                        <SLABadge sla={ticket.sla} size="sm" />
-                        <span className="text-xs text-slate-500">{formatSlaSummary(ticket.sla)}</span>
+
+                    {/* Assigned By */}
+                    <td className="hidden xl:table-cell px-3 py-3">
+                      <div>
+                        <div className="font-medium text-slate-900">
+                          {ticket.assignedByName || 'System'}
+                        </div>
+
+                        <div className="text-xs text-slate-500">
+                          {ticket.assignedById
+                            ? `${ticket.assignedByRole || 'admin'} ${formatRoleId(
+                                ticket.assignedByRole || 'admin',
+                                ticket.assignedById
+                              )}`
+                            : 'Auto Assignment'}
+                        </div>
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-slate-600">{ticket.crewMembers?.length ? ticket.crewSummary : '-'}</td>
-                    <td className="px-3 py-3">
+
+                    {/* Assigned Time */}
+                    <td className="hidden lg:table-cell px-3 py-3 text-slate-600 whitespace-nowrap">
+                      {formatAssignedAt(ticket.assignedAt)}
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-3 py-3 text-center">
+                      <StatusBadge status={ticket.status} size="sm" />
+                    </td>
+
+                    {/* Crew */}
+                    <td className="hidden lg:table-cell px-3 py-3">
+                      {ticket.crewMembers?.length ? (
+                        <span className="text-xs text-slate-700">
+                          {ticket.crewSummary}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">
+                          No crew
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Action */}
+                    <td className="px-3 py-3 text-center">
                       <button
                         type="button"
                         onClick={() => editAssignment(ticket)}
-                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                        className="rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800"
                       >
-                        Edit Assignment
+                        Edit
                       </button>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-sm text-slate-500">
-                    No assigned tickets yet. Confirm a dispatch assignment to move a ticket into this table.
+                  <td
+                    colSpan={8}
+                    className="px-6 py-12 text-center"
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="rounded-full bg-slate-100 p-3">
+                        <FiClipboard className="h-5 w-5 text-slate-400" />
+                      </div>
+
+                      <h3 className="text-sm font-medium text-slate-700">
+                        No Assigned Tickets
+                      </h3>
+
+                      <p className="text-sm text-slate-500">
+                        Confirm a dispatch assignment to move a ticket into this table.
+                      </p>
+                    </div>
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
+            <p className="text-sm text-slate-500">
+              Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}
+              -
+              {Math.min(currentPage * ITEMS_PER_PAGE, assignedTickets.length)}
+              of {assignedTickets.length}
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((p) => p - 1)}
+                className="rounded-lg border border-slate-300 px-3 py-1 text-sm disabled:opacity-50"
+              >
+                Previous
+              </button>
+
+              <span className="flex items-center px-2 text-sm font-medium">
+                Page {currentPage} of {totalPages || 1}
+              </span>
+
+              <button
+                type="button"
+                disabled={currentPage === totalPages || totalPages === 0}
+                onClick={() => setCurrentPage((p) => p + 1)}
+                className="rounded-lg border border-slate-300 px-3 py-1 text-sm disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </Layout>
